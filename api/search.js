@@ -41,7 +41,8 @@ export default async function handler(req, res) {
           '--disable-blink-features=AutomationControlled',
           '--disable-web-security',
           '--disable-features=VizDisplayCompositor'
-        ]
+        ],
+        executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined
       });
 
       const page = await browser.newPage();
@@ -62,7 +63,7 @@ export default async function handler(req, res) {
       await page.waitForTimeout(2000);
 
       // Extrair resultados
-      const results = await page.evaluate(() => {
+      results = await page.evaluate(() => {
         const extractedResults = [];
         const allLinks = Array.from(document.querySelectorAll('a[href]')).filter(a => {
           const href = a.href;
@@ -147,7 +148,7 @@ export default async function handler(req, res) {
       const $ = cheerio.load(html);
 
       // Extrair resultados do Google com cheerio
-      const results = [];
+      results = [];
       $('div.g, div[data-ved]').each((index, element) => {
         if (index >= 8) return;
 
