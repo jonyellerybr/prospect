@@ -237,7 +237,7 @@ export default async function handler(req, res) {
         return extractedResults;
       });
 
-      // Usar IA para validar se os links são realmente de empresas (apenas individuais, não listas/diretórios)
+      // Validação simplificada baseada no título e URL (sem abrir novas páginas para evitar sobrecarga)
       const validatedResults = [];
       for (const result of results) {
         try {
@@ -254,7 +254,10 @@ export default async function handler(req, res) {
             /mercadolivre/i, /olx/i, /wikipedia/i, /google/i,
             /translate\.google/i, /maps\.google/i, /books\.google/i,
             /news\.google/i, /linkedin/i, /twitter/i, /tiktok/i,
-            /tripadvisor/i, /yelp/i, /ifood/i, /uber eats/i
+            /tripadvisor/i, /yelp/i, /ifood/i, /uber eats/i,
+            /restaurantes.*fortaleza/i, /melhores.*restaurantes/i,
+            /top.*restaurantes/i, /guias.*restaurantes/i,
+            /restaurante.*em.*fortaleza/i, /onde.*comer/i
           ];
 
           const shouldReject = rejectPatterns.some(pattern =>
@@ -266,110 +269,42 @@ export default async function handler(req, res) {
             continue;
           }
 
-          // Criar um novo browser para validação (mais seguro)
-          const puppeteer = isVercel ?
-            await import("puppeteer-core") :
-            await import("puppeteer");
+          // Verificar se parece ser uma empresa individual baseada no título
+          const businessIndicators = [
+            /\b(restaurante|bar|lanchonete|pizzaria|hamburgueria|açaiteria|padaria|cafeteria)\b/i,
+            /\b(advogado|escritório|dentista|clínica|psicólogo|nutricionista)\b/i,
+            /\b(salão|barbearia|estética|manicure|depilação|spa)\b/i,
+            /\b(academia|personal|crossfit|pilates|yoga|fisioterapia)\b/i,
+            /\b(pet.*shop|veterinário|banho.*tosa)\b/i,
+            /\b(mecânica|auto.*center|lava.*jato)\b/i,
+            /\b(loja|boutique|moda|roupas|calçados|joalheria)\b/i,
+            /\b(farmácia|drogaria|manipulação)\b/i,
+            /\b(construtora|engenharia|reformas|pinturas|marcenaria)\b/i,
+            /\b(contabilidade|consultoria|imobiliária|corretor)\b/i,
+            /\b(escola|curso|idiomas|pré.*vestibular)\b/i,
+            /\b(assistência.*técnica|informática|eletrônica)\b/i,
+            /\b(fotografia|decoração|design|floricultura|chaveiro)\b/i
+          ];
 
-          const validationBrowser = await puppeteer.launch(launchOptions);
-          const validationPage = await validationBrowser.newPage();
+          const hasBusinessIndicator = businessIndicators.some(pattern =>
+            pattern.test(titleLower) || pattern.test(result.description)
+          );
 
-          // Configurar headers para validação
-          await validationPage.setExtraHTTPHeaders({
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-          });
-
-          await validationPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-
-          // Visitar a página e analisar
-          await validationPage.goto(result.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-          await new Promise(resolve => setTimeout(resolve, 2000));
-
-          const analysis = await validationPage.evaluate(() => {
-            const bodyText = document.body?.textContent?.toLowerCase() || '';
-            const url = window.location.href.toLowerCase();
-            const title = document.title?.toLowerCase() || '';
-
-            // Verificar se é uma página de empresa individual (não lista/diretório)
-            const isListPage = bodyText.includes('lista de') ||
-                              bodyText.includes('diretório') ||
-                              bodyText.includes('empresas em') ||
-                              bodyText.includes('encontre') ||
-                              bodyText.includes('buscar') ||
-                              /resultado.*busca/i.test(bodyText) ||
-                              document.querySelectorAll('a[href*="empresa"], a[href*="business"]').length > 10;
-
-            if (isListPage) {
-              return { isCompany: false, reason: 'Página de lista/diretório' };
-            }
-
-            const positive = {
-              contact: !!(document.querySelector('a[href*="tel:"], a[href*="mailto:"]') ||
-                         bodyText.includes('contato') || bodyText.includes('telefone') ||
-                         bodyText.includes('fale conosco')),
-              services: !!(bodyText.includes('serviço') || bodyText.includes('produto') ||
-                          bodyText.includes('oferecemos') || bodyText.includes('trabalhamos')),
-              location: !!(bodyText.includes('endereço') || bodyText.includes('localização') ||
-                          document.querySelector('iframe[src*="maps"]')),
-              whatsapp: !!document.querySelector('a[href*="wa.me"], a[href*="whatsapp"]'),
-              pricing: !!(bodyText.includes('preço') || bodyText.includes('orçamento') ||
-                         bodyText.includes('cotação')),
-              businessHours: !!(bodyText.includes('horário') || bodyText.includes('funcionamento')),
-              about: !!(bodyText.includes('sobre nós') || bodyText.includes('empresa') ||
-                       bodyText.includes('história'))
-            };
-
-            const negative = {
-              news: !!(bodyText.includes('notícia') || url.includes('/noticia/') ||
-                      title.includes('notícia')),
-              directory: !!(bodyText.includes('diretório') || bodyText.includes('lista de empresas')),
-              social: !!(url.includes('facebook.com') || url.includes('instagram.com')),
-              marketplace: !!(url.includes('mercadolivre') || url.includes('olx.com')),
-              search: !!(bodyText.includes('resultados da busca') || bodyText.includes('não encontrou'))
-            };
-
-            const positiveScore = Object.values(positive).filter(Boolean).length;
-            const negativeScore = Object.values(negative).filter(Boolean).length;
-            const score = positiveScore - (negativeScore * 2);
-
-            return {
-              isCompany: score >= 2 && !Object.values(negative).some(Boolean),
-              score,
-              positiveScore,
-              negativeScore,
-              positive,
-              negative,
-              bodyPreview: bodyText.substring(0, 1000)
-            };
-          });
-
-          await validationBrowser.close();
-
-          // Decidir se é empresa baseado na análise
-          if (!analysis.isCompany) {
-            console.log(`❌ ${result.title} - Descartado: ${analysis.reason || `score ${analysis.score} (positivo: ${analysis.positiveScore}, negativo: ${analysis.negativeScore})`}`);
+          if (!hasBusinessIndicator) {
+            console.log(`❌ ${result.title} - Rejeitado: não parece ser empresa comercial`);
             continue;
           }
 
-          console.log(`✅ ${result.title} - Empresa confirmada (score: ${analysis.score})`);
+          console.log(`✅ ${result.title} - Empresa potencial identificada`);
           validatedResults.push(result);
-
-          // Pequena pausa entre validações
-          await new Promise(resolve => setTimeout(resolve, 1000));
 
         } catch (validationError) {
           console.error(`❌ Erro na validação de ${result.title}:`, validationError.message);
-          // Em caso de erro de carregamento, não incluir (pode ser página problemática)
           continue;
         }
       }
 
-      console.log(`🎯 Após validação rigorosa: ${validatedResults.length} empresas individuais confirmadas de ${results.length} links iniciais`);
+      console.log(`🎯 Após validação: ${validatedResults.length} empresas potenciais identificadas de ${results.length} links iniciais`);
       results = validatedResults;
 
       console.log(`📊 Extraídos ${results.length} resultados válidos`);
