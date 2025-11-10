@@ -2,9 +2,7 @@ import { storage } from './storage.js';
 
 // URL to the Chromium binary package hosted in /public, if not in production, use a fallback URL
 // alternatively, you can host the chromium-pack.tar file elsewhere and update the URL below
-const CHROMIUM_PACK_URL = process.env.VERCEL_PROJECT_PRODUCTION_URL
-  ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}/chromium-pack.tar`
-  : "https://raw.githubusercontent.com/gabenunez/puppeteer-on-vercel/refs/heads/main/example/chromium-dont-use-in-prod.tar";
+const CHROMIUM_PACK_URL = "https://github.com/Sparticuz/chromium/releases/download/v126.0.0/chromium-v126.0.0-pack.tar";
 
 // Cache the Chromium executable path to avoid re-downloading on subsequent requests
 let cachedExecutablePath = null;
