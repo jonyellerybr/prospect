@@ -98,17 +98,49 @@ const BUSINESS_TYPES = [
 ];
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+   if (req.method !== 'POST') {
+     return res.status(405).json({ error: 'Method not allowed' });
+   }
 
-  try {
-    const { searchIndex = 0, maxSearches = 5 } = req.body;
+   try {
+     const { searchIndex = 0, maxSearches = 5 } = req.body;
 
-    // Gerar termo de busca
-    const neighborhood = NEIGHBORHOODS[searchIndex % NEIGHBORHOODS.length];
-    const business = BUSINESS_TYPES[Math.floor(searchIndex / NEIGHBORHOODS.length) % BUSINESS_TYPES.length];
-    const searchTerm = `${business} ${neighborhood} fortaleza`;
+     // Gerar termo de busca
+     const neighborhood = NEIGHBORHOODS[searchIndex % NEIGHBORHOODS.length];
+     const business = BUSINESS_TYPES[Math.floor(searchIndex / NEIGHBORHOODS.length) % BUSINESS_TYPES.length];
+     const searchTerm = `${business} ${neighborhood} fortaleza`;
+
+     // Verificar se já existe busca para este termo
+     const existingSearchKey = `search:${Buffer.from(searchTerm).toString('base64')}`;
+     const existingSearch = await storage.getCompany(existingSearchKey);
+
+     if (existingSearch && existingSearch.completedAt) {
+       console.log(`🔄 Busca já realizada anteriormente: ${searchTerm}`);
+
+       // Buscar resultados associados a esta busca
+       const allCompanies = await storage.getAllCompanies();
+       const relatedResults = allCompanies.filter(company =>
+         company.searchTerm === searchTerm && company.foundAt
+       );
+
+       // Atualizar estatísticas mesmo para buscas puladas (não incrementar totalSearches)
+       await storage.incrementStat('totalResults', relatedResults.length);
+       await storage.incrementNeighborhoodHits(neighborhood, relatedResults.length);
+       await storage.incrementBusinessHits(business, relatedResults.length);
+
+       return res.status(200).json({
+         success: true,
+         searchTerm,
+         neighborhood,
+         businessType: business,
+         resultsFound: relatedResults.length,
+         results: relatedResults,
+         nextSearchIndex: searchIndex + 1,
+         hasMore: searchIndex + 1 < maxSearches,
+         skipped: true,
+         message: 'Busca já realizada anteriormente'
+       });
+     }
 
     console.log(`🔍 Buscando: ${searchTerm}`);
 
@@ -339,6 +371,15 @@ export default async function handler(req, res) {
         });
       }
 
+      // Marcar busca como concluída
+      await storage.saveCompany(existingSearchKey, {
+        searchTerm,
+        neighborhood,
+        businessType: business,
+        completedAt: timestamp,
+        resultsCount: validResults.length
+      });
+
       // Atualizar estatísticas
       await storage.incrementStat('totalSearches', 1);
       await storage.incrementStat('totalResults', validResults.length);
@@ -348,7 +389,14 @@ export default async function handler(req, res) {
       // Atualizar sistema de aprendizado
       await updateLearning(searchTerm, neighborhood, business, 'google_search', validResults.length);
     } else {
-      // Mesmo sem resultados, atualizar aprendizado para estratégia pouco efetiva
+      // Mesmo sem resultados, marcar busca como concluída e atualizar aprendizado
+      await storage.saveCompany(existingSearchKey, {
+        searchTerm,
+        neighborhood,
+        businessType: business,
+        completedAt: Date.now(),
+        resultsCount: 0
+      });
       await updateLearning(searchTerm, neighborhood, business, 'google_search', 0);
     }
 

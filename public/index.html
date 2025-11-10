@@ -152,6 +152,22 @@
             </div>
         </div>
 
+        <!-- Previous Searches -->
+        <div class="bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl p-6 mb-6">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xl font-bold text-gray-800">
+                    <i class="fas fa-history text-blue-600 mr-2"></i>
+                    Buscas Anteriores
+                </h2>
+                <button id="toggle-searches-btn" class="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-600 transition-colors">
+                    <i class="fas fa-eye mr-1"></i>Mostrar/Ocultar
+                </button>
+            </div>
+            <div id="searches-container" class="space-y-2 max-h-64 overflow-y-auto hidden">
+                <p class="text-gray-500 text-center py-4">Carregando buscas anteriores...</p>
+            </div>
+        </div>
+
         <!-- Results -->
         <div class="bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl p-6">
             <div class="flex items-center justify-between mb-4">
@@ -198,13 +214,16 @@
             learningSearches: document.getElementById('learning-searches'),
             learningSuccesses: document.getElementById('learning-successes'),
             learningFailures: document.getElementById('learning-failures'),
-            topLearningNeighborhoods: document.getElementById('top-learning-neighborhoods')
+            topLearningNeighborhoods: document.getElementById('top-learning-neighborhoods'),
+            toggleSearchesBtn: document.getElementById('toggle-searches-btn'),
+            searchesContainer: document.getElementById('searches-container')
         };
 
         // Start prospecting
         elements.startBtn.addEventListener('click', startProspecting);
         elements.stopBtn.addEventListener('click', stopProspecting);
         elements.loadMoreBtn.addEventListener('click', loadMoreResults);
+        elements.toggleSearchesBtn.addEventListener('click', toggleSearches);
 
         async function startProspecting() {
             if (isRunning) return;
@@ -263,14 +282,21 @@
                 const data = await response.json();
 
                 if (data.success) {
+                    const statusIcon = data.skipped ? '🔄' : '🔍';
+                    const statusText = data.skipped ? 'Busca pulada (já realizada)' : data.searchTerm;
+
                     elements.currentSearch.innerHTML = `
-                        <strong>🔍 ${data.searchTerm}</strong><br>
+                        <strong>${statusIcon} ${statusText}</strong><br>
                         <small class="text-gray-500">
                             ${data.neighborhood} • ${data.businessType} • ${data.resultsFound} resultados
                         </small>
                     `;
 
-                    addStatusMessage(`Encontrados ${data.resultsFound} resultados para "${data.searchTerm}"`);
+                    if (data.skipped) {
+                        addStatusMessage(`Busca pulada: "${data.searchTerm}" já foi realizada anteriormente`);
+                    } else {
+                        addStatusMessage(`Encontrados ${data.resultsFound} resultados para "${data.searchTerm}"`);
+                    }
 
                     if (data.resultsFound > 0) {
                         addResults(data.results);
@@ -286,6 +312,7 @@
                         addStatusMessage('Prospecção concluída!');
                         stopProspecting();
                         loadStats();
+                        loadResults(); // Recarregar para mostrar buscas atualizadas
                     }
                 } else {
                     console.error('Erro:', data.error);
@@ -395,7 +422,7 @@
             try {
                 const limit = append ? resultsPerPage : 50;
                 const offset = append ? currentOffset : 0;
-                const response = await fetch(`/api/results?limit=${limit}&offset=${offset}`);
+                const response = await fetch(`/api/results?limit=${limit}&offset=${offset}&includeSearches=true`);
                 const data = await response.json();
 
                 if (data.success) {
@@ -409,10 +436,55 @@
                         Math.min(data.results.length, data.total);
 
                     elements.loadMoreBtn.style.display = data.pagination.hasMore ? 'block' : 'none';
+
+                    // Carregar buscas anteriores
+                    if (data.previousSearches) {
+                        loadPreviousSearches(data.previousSearches);
+                    }
                 }
             } catch (error) {
                 console.error('Erro ao carregar resultados:', error);
             }
+        }
+
+        function toggleSearches() {
+            const isHidden = elements.searchesContainer.classList.contains('hidden');
+            if (isHidden) {
+                elements.searchesContainer.classList.remove('hidden');
+                elements.toggleSearchesBtn.innerHTML = '<i class="fas fa-eye-slash mr-1"></i>Ocultar';
+            } else {
+                elements.searchesContainer.classList.add('hidden');
+                elements.toggleSearchesBtn.innerHTML = '<i class="fas fa-eye mr-1"></i>Mostrar';
+            }
+        }
+
+        function loadPreviousSearches(searches) {
+            if (searches.length === 0) {
+                elements.searchesContainer.innerHTML = '<p class="text-gray-500 text-center py-4">Nenhuma busca anterior encontrada</p>';
+                return;
+            }
+
+            elements.searchesContainer.innerHTML = '';
+
+            searches.forEach(search => {
+                const div = document.createElement('div');
+                div.className = 'bg-gray-50 p-3 rounded-lg border-l-4 border-blue-500';
+                const completedDate = search.completedAt ? new Date(search.completedAt).toLocaleDateString('pt-BR') : 'N/A';
+
+                div.innerHTML = `
+                    <div class="flex items-start justify-between mb-1">
+                        <h4 class="font-semibold text-gray-800 text-sm">${search.searchTerm}</h4>
+                        <span class="text-xs text-gray-500 bg-gray-200 px-2 py-1 rounded">${completedDate}</span>
+                    </div>
+                    <div class="text-xs text-gray-600 mb-1">
+                        <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded mr-1">${search.neighborhood}</span>
+                        <span class="bg-purple-100 text-purple-800 px-2 py-1 rounded mr-1">${search.businessType}</span>
+                        <span class="text-gray-500">• ${search.resultsCount} resultados</span>
+                    </div>
+                `;
+
+                elements.searchesContainer.appendChild(div);
+            });
         }
 
         async function loadStats() {
