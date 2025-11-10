@@ -237,6 +237,129 @@ export default async function handler(req, res) {
         return extractedResults;
       });
 
+      // Usar IA para validar se os links são realmente de empresas
+      const validatedResults = [];
+      for (const result of results) {
+        try {
+          console.log(`🤖 Validando empresa: ${result.title}`);
+
+          // Criar um novo browser para validação (mais seguro)
+          const validationBrowser = await puppeteer.launch(launchOptions);
+          const validationPage = await validationBrowser.newPage();
+
+          // Configurar headers para validação
+          await validationPage.setExtraHTTPHeaders({
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+          });
+
+          await validationPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+          // Visitar a página e analisar
+          await validationPage.goto(result.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+          await new Promise(resolve => setTimeout(resolve, 2000));
+
+          const analysis = await validationPage.evaluate(() => {
+            const bodyText = document.body?.textContent?.toLowerCase() || '';
+            const url = window.location.href.toLowerCase();
+
+            const positive = {
+              contact: !!(document.querySelector('a[href*="tel:"], a[href*="mailto:"]') ||
+                         bodyText.includes('contato') || bodyText.includes('telefone')),
+              services: !!(bodyText.includes('serviço') || bodyText.includes('produto')),
+              location: !!(bodyText.includes('endereço') || document.querySelector('iframe[src*="maps"]')),
+              whatsapp: !!document.querySelector('a[href*="wa.me"], a[href*="whatsapp"]'),
+              pricing: !!(bodyText.includes('preço') || bodyText.includes('orçamento'))
+            };
+
+            const negative = {
+              news: !!(bodyText.includes('notícia') || url.includes('/noticia/')),
+              directory: !!(bodyText.includes('diretório') || bodyText.includes('lista de empresas')),
+              social: !!(url.includes('facebook.com') || url.includes('instagram.com')),
+              marketplace: !!(url.includes('mercadolivre') || url.includes('olx.com'))
+            };
+
+            const score = Object.values(positive).filter(Boolean).length -
+                          (Object.values(negative).filter(Boolean).length * 2);
+
+            return { positive, negative, score, bodyPreview: bodyText.substring(0, 1000) };
+          });
+
+          await validationBrowser.close();
+
+          // Decidir se é empresa baseado no score
+          if (analysis.negative.news || analysis.negative.directory ||
+              analysis.negative.social || analysis.negative.marketplace) {
+            console.log(`❌ ${result.title} - Descartado: não é empresa comercial`);
+            continue;
+          }
+
+          if (analysis.score >= 3) {
+            console.log(`✅ ${result.title} - Empresa confirmada (score: ${analysis.score})`);
+            validatedResults.push(result);
+          } else if (analysis.score >= 1) {
+            // Casos intermediários: consultar IA
+            console.log(`🤔 ${result.title} - Caso intermediário (score: ${analysis.score}), consultando IA...`);
+
+            try {
+              const prompt = `Analise se este é um site de empresa comercial real:
+
+URL: ${result.url}
+TÍTULO: ${result.title}
+DESCRIÇÃO: ${result.description}
+CONTEÚDO: ${analysis.bodyPreview}
+
+Responda apenas SIM ou NÃO.`;
+
+              const aiResponse = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=' + (process.env.GEMINI_KEYS?.split(',')[0] || ''), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [{ parts: [{ text: prompt }] }],
+                  generationConfig: { temperature: 0.1, maxOutputTokens: 50 }
+                })
+              });
+
+              if (aiResponse.ok) {
+                const aiResult = await aiResponse.json();
+                const text = aiResult?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+                const isCompany = /^\s*SIM\b/i.test(text || '');
+
+                if (isCompany) {
+                  console.log(`✅ ${result.title} - IA confirmou como empresa`);
+                  validatedResults.push(result);
+                } else {
+                  console.log(`❌ ${result.title} - IA descartou`);
+                }
+              } else {
+                console.log(`⚠️ ${result.title} - Erro na consulta IA, mantendo por score ${analysis.score}`);
+                validatedResults.push(result);
+              }
+            } catch (aiError) {
+              console.log(`⚠️ ${result.title} - Erro IA (${aiError.message}), mantendo por score ${analysis.score}`);
+              validatedResults.push(result);
+            }
+          } else {
+            console.log(`❌ ${result.title} - Score muito baixo (${analysis.score})`);
+          }
+
+          // Pequena pausa entre validações
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+        } catch (validationError) {
+          console.error(`❌ Erro na validação de ${result.title}:`, validationError.message);
+          // Em caso de erro, manter o resultado (pode ser empresa válida)
+          validatedResults.push(result);
+        }
+      }
+
+      console.log(`🎯 Após validação: ${validatedResults.length} empresas confirmadas de ${results.length} links`);
+      results = validatedResults;
+
       console.log(`📊 Extraídos ${results.length} resultados válidos`);
 
     } catch (browserError) {

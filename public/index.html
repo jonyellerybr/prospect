@@ -82,7 +82,7 @@
         </div>
 
         <!-- Stats -->
-        <div class="grid md:grid-cols-4 gap-4 mb-6">
+        <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <div class="bg-gradient-to-br from-purple-500 to-purple-700 text-white rounded-xl shadow-lg p-6">
                 <div class="flex items-center justify-between">
                     <div>
@@ -113,22 +113,61 @@
             <div class="bg-gradient-to-br from-orange-500 to-orange-700 text-white rounded-xl shadow-lg p-6">
                 <div class="flex items-center justify-between">
                     <div>
-                        <p class="text-orange-100 text-sm">Resultados</p>
-                        <p id="stat-results" class="text-3xl font-bold">0</p>
+                        <p class="text-orange-100 text-sm">Taxa Sucesso</p>
+                        <p id="stat-success-rate" class="text-3xl font-bold">0%</p>
                     </div>
-                    <i class="fas fa-trophy text-4xl text-orange-200"></i>
+                    <i class="fas fa-brain text-4xl text-orange-200"></i>
+                </div>
+            </div>
+        </div>
+
+        <!-- Learning Stats -->
+        <div class="bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl p-6 mb-6">
+            <h2 class="text-xl font-bold mb-4 text-gray-800">
+                <i class="fas fa-robot text-indigo-600 mr-2"></i>
+                Sistema de Aprendizado IA
+            </h2>
+            <div class="grid md:grid-cols-3 gap-4">
+                <div class="bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-lg p-4">
+                    <h3 class="font-semibold text-indigo-800 mb-2">Buscas Aprendidas</h3>
+                    <p id="learning-searches" class="text-2xl font-bold text-indigo-600">0</p>
+                    <p class="text-sm text-indigo-600">Total de buscas no histórico</p>
+                </div>
+                <div class="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-4">
+                    <h3 class="font-semibold text-green-800 mb-2">Sucessos</h3>
+                    <p id="learning-successes" class="text-2xl font-bold text-green-600">0</p>
+                    <p class="text-sm text-green-600">Buscas que encontraram empresas</p>
+                </div>
+                <div class="bg-gradient-to-br from-red-50 to-red-100 rounded-lg p-4">
+                    <h3 class="font-semibold text-red-800 mb-2">Falhas</h3>
+                    <p id="learning-failures" class="text-2xl font-bold text-red-600">0</p>
+                    <p class="text-sm text-red-600">Buscas sem resultados</p>
+                </div>
+            </div>
+            <div class="mt-4">
+                <h3 class="font-semibold text-gray-800 mb-2">Top Bairros (Aprendizado)</h3>
+                <div id="top-learning-neighborhoods" class="flex flex-wrap gap-2">
+                    <span class="text-gray-500">Carregando...</span>
                 </div>
             </div>
         </div>
 
         <!-- Results -->
         <div class="bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl p-6">
-            <h2 class="text-xl font-bold mb-4 text-gray-800">
-                <i class="fas fa-list text-green-600 mr-2"></i>
-                Empresas Encontradas
-            </h2>
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xl font-bold text-gray-800">
+                    <i class="fas fa-list text-green-600 mr-2"></i>
+                    Empresas Encontradas
+                </h2>
+                <button id="load-more-btn" class="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-600 transition-colors">
+                    <i class="fas fa-plus mr-1"></i>Carregar Mais
+                </button>
+            </div>
             <div id="results-container" class="space-y-3 max-h-96 overflow-y-auto">
                 <p class="text-gray-500 text-center py-8">Nenhuma empresa encontrada ainda</p>
+            </div>
+            <div id="results-info" class="mt-4 text-sm text-gray-600 text-center">
+                Mostrando <span id="results-shown">0</span> de <span id="results-total">0</span> empresas
             </div>
         </div>
     </div>
@@ -138,6 +177,8 @@
         let currentSearchIndex = 0;
         let maxSearches = 10;
         let searchInterval = null;
+        let currentOffset = 0;
+        const resultsPerPage = 20;
 
         const elements = {
             startBtn: document.getElementById('start-btn'),
@@ -149,12 +190,21 @@
             currentSearch: document.getElementById('current-search'),
             resultsContainer: document.getElementById('results-container'),
             maxSearchesInput: document.getElementById('max-searches'),
-            statusMessages: document.getElementById('status-messages')
+            statusMessages: document.getElementById('status-messages'),
+            loadMoreBtn: document.getElementById('load-more-btn'),
+            resultsShown: document.getElementById('results-shown'),
+            resultsTotal: document.getElementById('results-total'),
+            statSuccessRate: document.getElementById('stat-success-rate'),
+            learningSearches: document.getElementById('learning-searches'),
+            learningSuccesses: document.getElementById('learning-successes'),
+            learningFailures: document.getElementById('learning-failures'),
+            topLearningNeighborhoods: document.getElementById('top-learning-neighborhoods')
         };
 
         // Start prospecting
         elements.startBtn.addEventListener('click', startProspecting);
         elements.stopBtn.addEventListener('click', stopProspecting);
+        elements.loadMoreBtn.addEventListener('click', loadMoreResults);
 
         async function startProspecting() {
             if (isRunning) return;
@@ -261,33 +311,104 @@
             elements.progressText.textContent = `${current}/${total} buscas`;
         }
 
-        function addResults(results) {
-            if (elements.resultsContainer.querySelector('p.text-gray-500')) {
+        function addResults(results, append = false) {
+            if (!append && elements.resultsContainer.querySelector('p.text-gray-500')) {
                 elements.resultsContainer.innerHTML = '';
             }
 
             results.forEach(result => {
                 const div = document.createElement('div');
-                div.className = 'bg-gray-50 p-4 rounded-lg hover:bg-gray-100 transition-colors';
+                div.className = 'bg-gray-50 p-4 rounded-lg hover:bg-gray-100 transition-colors border-l-4 border-green-500';
+                const foundDate = result.foundAt ? new Date(result.foundAt).toLocaleDateString('pt-BR') : 'N/A';
+                const searchTerm = result.searchTerm || 'N/A';
+                const neighborhood = result.neighborhood || 'N/A';
+                const businessType = result.businessType || 'N/A';
+
                 div.innerHTML = `
-                    <h3 class="font-semibold text-gray-800 mb-1">${result.title}</h3>
-                    <a href="${result.url}" target="_blank" class="text-blue-600 text-sm hover:underline">
-                        ${result.url}
+                    <div class="flex items-start justify-between mb-2">
+                        <h3 class="font-semibold text-gray-800 flex-1">${result.title}</h3>
+                        <span class="text-xs text-gray-500 bg-gray-200 px-2 py-1 rounded">${foundDate}</span>
+                    </div>
+                    <div class="text-xs text-gray-600 mb-2">
+                        <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded mr-1">${neighborhood}</span>
+                        <span class="bg-purple-100 text-purple-800 px-2 py-1 rounded mr-1">${businessType}</span>
+                        <span class="text-gray-500">• ${searchTerm}</span>
+                    </div>
+                    <a href="${result.url}" target="_blank" class="text-blue-600 text-sm hover:underline block mb-2">
+                        ${result.url.length > 60 ? result.url.substring(0, 60) + '...' : result.url}
                     </a>
-                    <p class="text-gray-600 text-sm mt-2">${result.description.substring(0, 150)}...</p>
+                    <p class="text-gray-600 text-sm">${result.description ? result.description.substring(0, 150) + '...' : 'Sem descrição'}</p>
+                    <div class="mt-3 flex gap-2">
+                        <button onclick="analyzeCompany('${result.url.replace(/'/g, "\\'")}')" class="bg-indigo-500 text-white text-xs px-3 py-1 rounded hover:bg-indigo-600 transition-colors">
+                            <i class="fas fa-brain mr-1"></i>Analisar IA
+                        </button>
+                        <button onclick="openCompany('${result.url}')" class="bg-green-500 text-white text-xs px-3 py-1 rounded hover:bg-green-600 transition-colors">
+                            <i class="fas fa-external-link-alt mr-1"></i>Visitar
+                        </button>
+                    </div>
                 `;
-                elements.resultsContainer.insertBefore(div, elements.resultsContainer.firstChild);
+                if (append) {
+                    elements.resultsContainer.appendChild(div);
+                } else {
+                    elements.resultsContainer.insertBefore(div, elements.resultsContainer.firstChild);
+                }
             });
         }
 
-        async function loadResults() {
+        function loadMoreResults() {
+            currentOffset += resultsPerPage;
+            loadResults(true);
+        }
+
+        function openCompany(url) {
+            window.open(url, '_blank');
+        }
+
+        async function analyzeCompany(url) {
+            if (confirm('Deseja analisar esta empresa com IA? Isso pode levar alguns segundos.')) {
+                // Encontrar o ID da empresa
+                const companyId = btoa(url).substring(0, 50);
+                try {
+                    const response = await fetch('/api/analyze', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            action: 'analyze_company_deep',
+                            companyId: companyId
+                        })
+                    });
+
+                    const data = await response.json();
+                    if (data.success) {
+                        alert('Análise concluída! Verifique os detalhes da empresa.');
+                        loadResults(); // Recarregar para mostrar análise
+                    } else {
+                        alert('Erro na análise: ' + data.error);
+                    }
+                } catch (error) {
+                    alert('Erro ao analisar empresa: ' + error.message);
+                }
+            }
+        }
+
+        async function loadResults(append = false) {
             try {
-                const response = await fetch('/api/results?limit=20');
+                const limit = append ? resultsPerPage : 50;
+                const offset = append ? currentOffset : 0;
+                const response = await fetch(`/api/results?limit=${limit}&offset=${offset}`);
                 const data = await response.json();
 
-                if (data.success && data.results.length > 0) {
-                    elements.resultsContainer.innerHTML = '';
-                    addResults(data.results);
+                if (data.success) {
+                    if (data.results.length > 0) {
+                        addResults(data.results, append);
+                    }
+
+                    elements.resultsTotal.textContent = data.total;
+                    elements.resultsShown.textContent = append ?
+                        Math.min(currentOffset + data.results.length, data.total) :
+                        Math.min(data.results.length, data.total);
+
+                    elements.loadMoreBtn.style.display = data.pagination.hasMore ? 'block' : 'none';
                 }
             } catch (error) {
                 console.error('Erro ao carregar resultados:', error);
@@ -303,7 +424,16 @@
                     document.getElementById('stat-companies').textContent = data.general.uniqueCompanies;
                     document.getElementById('stat-searches').textContent = data.general.totalSearches;
                     document.getElementById('stat-average').textContent = data.general.averagePerSearch;
-                    document.getElementById('stat-results').textContent = data.general.totalResults;
+                    document.getElementById('stat-success-rate').textContent = data.learning.successRate;
+                    document.getElementById('learning-searches').textContent = data.learning.totalLearningSearches;
+                    document.getElementById('learning-successes').textContent = data.learning.successfulSearches;
+                    document.getElementById('learning-failures').textContent = data.learning.failedSearches;
+
+                    // Top bairros do aprendizado
+                    const neighborhoodsHtml = data.learning.topNeighborhoods.map(n =>
+                        `<span class="bg-indigo-100 text-indigo-800 px-2 py-1 rounded text-xs">${n.name} (${n.score})</span>`
+                    ).join(' ');
+                    elements.topLearningNeighborhoods.innerHTML = neighborhoodsHtml || '<span class="text-gray-500 text-xs">Nenhum dado ainda</span>';
                 }
             } catch (error) {
                 console.error('Erro ao carregar stats:', error);
