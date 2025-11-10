@@ -110,7 +110,8 @@ const mistralService = new MistralService();
 
 // Função principal para análise de empresas
 export async function analyzeCompany(companyData) {
-  const prompt = `Analise esta empresa e forneça informações úteis para prospecção comercial:
+  // Usar prompt customizado se fornecido (para validação)
+  const prompt = companyData.customPrompt || `Analise esta empresa e forneça informações úteis para prospecção comercial:
 
 Empresa: ${companyData.title}
 Descrição: ${companyData.description}

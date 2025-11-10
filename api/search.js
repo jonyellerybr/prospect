@@ -1,5 +1,5 @@
 import { storage } from './storage.js';
-import { updateLearning } from './ai.js';
+import { updateLearning, analyzeCompany } from './ai.js';
 
 // URL to the Chromium binary package hosted in /public, if not in production, use a fallback URL
 // alternatively, you can host the chromium-pack.tar file elsewhere and update the URL below
@@ -306,116 +306,36 @@ export default async function handler(req, res) {
       console.log(`📊 Total extraído de todas as páginas: ${allResults.length} resultados`);
       results = allResults;
 
-      console.log('📄 Página carregada, extraindo resultados...');
+      // Removido código duplicado - extração já feita acima no loop de páginas
 
-      // Extrair resultados usando JavaScript na página
-      results = await page.evaluate(() => {
-        const extractedResults = [];
-
-        // Função auxiliar para limpar texto
-        const cleanText = (text) => text?.trim().replace(/\s+/g, ' ') || '';
-
-        // Estratégia mais robusta para extrair resultados do Google
-        const allLinks = Array.from(document.querySelectorAll('a[href]')).filter(a => {
-          const href = a.href;
-          return href &&
-                 href.startsWith('http') &&
-                 !href.includes('google.com') &&
-                 !href.includes('youtube.com') &&
-                 !href.includes('wikipedia.org') &&
-                 !href.includes('facebook.com') &&
-                 !href.includes('instagram.com') &&
-                 !href.includes('linkedin.com') &&
-                 !href.includes('googleusercontent.com') &&
-                 !href.includes('translate.google.com') &&
-                 !href.includes('maps.google.com') &&
-                 !href.includes('books.google.com') &&
-                 !href.includes('news.google.com');
-        });
-
-        console.log(`🔍 Encontrados ${allLinks.length} links válidos na página...`);
-
-        for (let i = 0; i < Math.min(allLinks.length, 8); i++) {
-          const link = allLinks[i];
-          const title = link.textContent?.trim() || link.querySelector('h3')?.textContent?.trim() || '';
-
-          // Tentar encontrar o título no elemento pai se não estiver no link
-          let finalTitle = title;
-          if (!finalTitle) {
-            const parent = link.closest('div.g') || link.closest('div[data-ved]');
-            if (parent) {
-              const h3 = parent.querySelector('h3');
-              if (h3) finalTitle = h3.textContent?.trim();
-            }
-          }
-
-          if (finalTitle && finalTitle.length > 3) { // Título deve ter pelo menos 4 caracteres
-            console.log(`Resultado ${i + 1}:`);
-            console.log(`  Título: ${finalTitle.substring(0, 50)}`);
-            console.log(`  URL: ${link.href.substring(0, 50)}`);
-
-            // Extrair descrição do snippet do Google
-            let description = '';
-            const parent = link.closest('div.g') || link.closest('div[data-ved]');
-            if (parent) {
-              const snippet = parent.querySelector('span[data-ved]') || parent.querySelector('.VwiC3b') || parent.querySelector('span');
-              if (snippet) {
-                description = snippet.textContent?.trim() || '';
-              }
-            }
-
-            extractedResults.push({
-              title: finalTitle.substring(0, 100),
-              url: link.href,
-              description: description.substring(0, 200),
-              position: extractedResults.length + 1
-            });
-            console.log(`  ✅ Adicionado à lista`);
-
-            if (extractedResults.length >= 6) break;
-          } else {
-            console.log(`Resultado ${i + 1} rejeitado: título muito curto ou vazio`);
-          }
-        }
-
-        console.log(`📊 Total de resultados válidos extraídos: ${extractedResults.length}`);
-        return extractedResults;
-      });
-
-      // Validação simplificada baseada no título e URL (sem abrir novas páginas para evitar sobrecarga)
+      // Validação inteligente usando IA (removidos filtros hardcoded)
       const validatedResults = [];
       for (const result of results) {
         try {
-          console.log(`🤖 Validando empresa: ${result.title}`);
+          console.log(`🤖 Validando empresa com IA: ${result.title}`);
 
-          // Primeiro filtro rápido baseado na URL e título
+          // Análise básica inicial (muito permissiva)
           const urlLower = result.url.toLowerCase();
           const titleLower = result.title.toLowerCase();
 
-          // Rejeitar imediatamente listas, diretórios, notícias, etc.
-          const rejectPatterns = [
+          // Apenas rejeitar conteúdo claramente não-comercial
+          const hardRejectPatterns = [
             /lista.*empresa/i, /diretório/i, /notícia/i, /news/i,
-            /facebook\.com/i, /instagram\.com/i, /youtube\.com/i,
-            /mercadolivre/i, /olx/i, /wikipedia/i, /google/i,
-            /translate\.google/i, /maps\.google/i, /books\.google/i,
-            /news\.google/i, /linkedin/i, /twitter/i, /tiktok/i,
-            /tripadvisor/i, /yelp/i, /ifood/i, /uber eats/i,
-            /restaurantes.*fortaleza/i, /melhores.*restaurantes/i,
-            /top.*restaurantes/i, /guias.*restaurantes/i,
-            /restaurante.*em.*fortaleza/i, /onde.*comer/i
+            /wikipedia/i, /google/i, /translate\.google/i, /maps\.google/i,
+            /books\.google/i, /news\.google/i
           ];
 
-          const shouldReject = rejectPatterns.some(pattern =>
+          const shouldHardReject = hardRejectPatterns.some(pattern =>
             pattern.test(urlLower) || pattern.test(titleLower) || pattern.test(result.description)
           );
 
-          if (shouldReject) {
-            console.log(`❌ ${result.title} - Rejeitado: lista/diretório/notícia/redes sociais`);
+          if (shouldHardReject) {
+            console.log(`❌ ${result.title} - Rejeitado: conteúdo não-comercial`);
             continue;
           }
 
-          // Verificar se parece ser uma empresa individual baseada no título
-          const businessIndicators = [
+          // Verificar se tem indicadores básicos de negócio
+          const basicBusinessIndicators = [
             /\b(restaurante|bar|lanchonete|pizzaria|hamburgueria|açaiteria|padaria|cafeteria)\b/i,
             /\b(advogado|escritório|dentista|clínica|psicólogo|nutricionista)\b/i,
             /\b(salão|barbearia|estética|manicure|depilação|spa)\b/i,
@@ -428,20 +348,39 @@ export default async function handler(req, res) {
             /\b(contabilidade|consultoria|imobiliária|corretor)\b/i,
             /\b(escola|curso|idiomas|pré.*vestibular)\b/i,
             /\b(assistência.*técnica|informática|eletrônica)\b/i,
-            /\b(fotografia|decoração|design|floricultura|chaveiro)\b/i
+            /\b(fotografia|decoração|design|floricultura|chaveiro)\b/i,
+            /\b(facebook|instagram|linkedin|twitter|tiktok)\b/i, // Agora aceita redes sociais
+            /\b(site|online|digital|ecommerce)\b/i // Indicadores digitais
           ];
 
-          const hasBusinessIndicator = businessIndicators.some(pattern =>
+          const hasBasicIndicator = basicBusinessIndicators.some(pattern =>
             pattern.test(titleLower) || pattern.test(result.description)
           );
 
-          if (!hasBusinessIndicator) {
-            console.log(`❌ ${result.title} - Rejeitado: não parece ser empresa comercial`);
+          if (!hasBasicIndicator && result.title.length < 5) {
+            console.log(`❌ ${result.title} - Rejeitado: sem indicadores básicos de negócio`);
             continue;
           }
 
-          console.log(`✅ ${result.title} - Empresa potencial identificada`);
-          validatedResults.push(result);
+          // Análise de IA para decisão final (mais permissiva)
+          try {
+            const aiValidation = await validateWithAI(result);
+            if (aiValidation.isValid) {
+              console.log(`✅ ${result.title} - Aprovado por IA: ${aiValidation.reason}`);
+              validatedResults.push({
+                ...result,
+                aiValidation: aiValidation
+              });
+            } else {
+              console.log(`❌ ${result.title} - Rejeitado por IA: ${aiValidation.reason}`);
+            }
+          } catch (aiError) {
+            // Fallback: aceitar se tem indicadores básicos
+            console.log(`🤔 ${result.title} - IA falhou, usando fallback`);
+            if (hasBasicIndicator) {
+              validatedResults.push(result);
+            }
+          }
 
         } catch (validationError) {
           console.error(`❌ Erro na validação de ${result.title}:`, validationError.message);
@@ -606,6 +545,75 @@ async function performParallelSearches(startIndex, maxSearches, parallelCount, r
  }
 }
 
+// Função para validar empresa com IA
+async function validateWithAI(companyData) {
+  try {
+    const prompt = `Analise se esta é uma empresa válida para prospecção comercial:
+
+Empresa: ${companyData.title}
+Descrição: ${companyData.description}
+URL: ${companyData.url}
+
+IMPORTANTE: Considere que empresas iniciantes frequentemente usam:
+- Redes sociais (Facebook, Instagram, etc.) como presença inicial
+- Sites simples ou landing pages
+- Presença digital básica
+
+Responda APENAS com JSON:
+{
+  "isValid": true/false,
+  "reason": "breve explicação",
+  "confidence": 0-100
+}`;
+
+    // Usar função de análise existente mas com prompt específico
+    const analysis = await analyzeCompany({
+      ...companyData,
+      customPrompt: prompt
+    });
+
+    // Tentar extrair JSON da resposta
+    try {
+      const jsonMatch = analysis.analysis.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return {
+          isValid: parsed.isValid || false,
+          reason: parsed.reason || 'Análise inconclusiva',
+          confidence: parsed.confidence || 50
+        };
+      }
+    } catch (parseError) {
+      // Fallback baseado no conteúdo da análise
+      const content = analysis.analysis.toLowerCase();
+      const isValid = !content.includes('não é') && !content.includes('inválid') &&
+                     (content.includes('válid') || content.includes('empresa') ||
+                      content.includes('comercial') || content.includes('negócio'));
+
+      return {
+        isValid: isValid,
+        reason: isValid ? 'Análise positiva' : 'Análise negativa',
+        confidence: 70
+      };
+    }
+
+    // Fallback final
+    return {
+      isValid: true, // Mais permissivo por padrão
+      reason: 'Análise inconclusiva - aceitando por segurança',
+      confidence: 50
+    };
+
+  } catch (error) {
+    console.error('Erro na validação IA:', error);
+    return {
+      isValid: true, // Fallback permissivo
+      reason: 'Erro na IA - aceitando por segurança',
+      confidence: 30
+    };
+  }
+}
+
 // Função auxiliar para executar uma busca individual
 async function performSingleSearch(searchIndex) {
  // Gerar termo de busca
@@ -747,34 +755,83 @@ async function performSingleSearch(searchIndex) {
    console.error('❌ Erro no browser:', browserError.message);
  }
 
- // Validação simplificada
+ // Validação inteligente usando IA (removidos filtros hardcoded)
  const validatedResults = [];
  for (const result of results) {
-   const urlLower = result.url.toLowerCase();
-   const titleLower = result.title.toLowerCase();
+   try {
+     console.log(`🤖 Validando empresa com IA: ${result.title}`);
 
-   const rejectPatterns = [
-     /lista.*empresa/i, /diretório/i, /notícia/i, /news/i,
-     /facebook\.com/i, /instagram\.com/i, /youtube\.com/i,
-     /mercadolivre/i, /olx/i, /wikipedia/i, /google/i
-   ];
+     // Análise básica inicial (muito permissiva)
+     const urlLower = result.url.toLowerCase();
+     const titleLower = result.title.toLowerCase();
 
-   const shouldReject = rejectPatterns.some(pattern =>
-     pattern.test(urlLower) || pattern.test(titleLower)
-   );
-
-   if (!shouldReject) {
-     const businessIndicators = [
-       /\b(restaurante|advogado|dentista|salão|academia|pet|mecânica|loja)\b/i
+     // Apenas rejeitar conteúdo claramente não-comercial
+     const hardRejectPatterns = [
+       /lista.*empresa/i, /diretório/i, /notícia/i, /news/i,
+       /wikipedia/i, /google/i, /translate\.google/i, /maps\.google/i,
+       /books\.google/i, /news\.google/i
      ];
 
-     const hasBusinessIndicator = businessIndicators.some(pattern =>
+     const shouldHardReject = hardRejectPatterns.some(pattern =>
+       pattern.test(urlLower) || pattern.test(titleLower) || pattern.test(result.description)
+     );
+
+     if (shouldHardReject) {
+       console.log(`❌ ${result.title} - Rejeitado: conteúdo não-comercial`);
+       continue;
+     }
+
+     // Verificar se tem indicadores básicos de negócio
+     const basicBusinessIndicators = [
+       /\b(restaurante|bar|lanchonete|pizzaria|hamburgueria|açaiteria|padaria|cafeteria)\b/i,
+       /\b(advogado|escritório|dentista|clínica|psicólogo|nutricionista)\b/i,
+       /\b(salão|barbearia|estética|manicure|depilação|spa)\b/i,
+       /\b(academia|personal|crossfit|pilates|yoga|fisioterapia)\b/i,
+       /\b(pet.*shop|veterinário|banho.*tosa)\b/i,
+       /\b(mecânica|auto.*center|lava.*jato)\b/i,
+       /\b(loja|boutique|moda|roupas|calçados|joalheria)\b/i,
+       /\b(farmácia|drogaria|manipulação)\b/i,
+       /\b(construtora|engenharia|reformas|pinturas|marcenaria)\b/i,
+       /\b(contabilidade|consultoria|imobiliária|corretor)\b/i,
+       /\b(escola|curso|idiomas|pré.*vestibular)\b/i,
+       /\b(assistência.*técnica|informática|eletrônica)\b/i,
+       /\b(fotografia|decoração|design|floricultura|chaveiro)\b/i,
+       /\b(facebook|instagram|linkedin|twitter|tiktok)\b/i, // Agora aceita redes sociais
+       /\b(site|online|digital|ecommerce)\b/i // Indicadores digitais
+     ];
+
+     const hasBasicIndicator = basicBusinessIndicators.some(pattern =>
        pattern.test(titleLower) || pattern.test(result.description)
      );
 
-     if (hasBusinessIndicator) {
-       validatedResults.push(result);
+     if (!hasBasicIndicator && result.title.length < 5) {
+       console.log(`❌ ${result.title} - Rejeitado: sem indicadores básicos de negócio`);
+       continue;
      }
+
+     // Análise de IA para decisão final (mais permissiva)
+     try {
+       const aiValidation = await validateWithAI(result);
+       if (aiValidation.isValid) {
+         console.log(`✅ ${result.title} - Aprovado por IA: ${aiValidation.reason}`);
+         validatedResults.push({
+           ...result,
+           aiValidation: aiValidation
+         });
+       } else {
+         console.log(`❌ ${result.title} - Rejeitado por IA: ${aiValidation.reason}`);
+       }
+     } catch (aiError) {
+       // Fallback: aceitar se tem indicadores básicos
+       console.log(`🤔 ${result.title} - IA falhou, usando fallback`);
+       if (hasBasicIndicator) {
+         validatedResults.push(result);
+       }
+     }
+
+   } catch (validationError) {
+     console.error(`❌ Erro na validação de ${result.title}:`, validationError.message);
+     continue;
    }
  }
 
