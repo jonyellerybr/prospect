@@ -406,11 +406,43 @@ export default async function handler(req, res) {
       (r.description.length > 5 || r.title.length > 3) // Mais permissivo
     );
 
-    // Salvar no JSON storage e atualizar aprendizado
-    if (validResults.length > 0) {
+    // Aplicar validação IA final e salvar apenas empresas aprovadas
+    const aiValidatedResults = [];
+    for (const result of validResults) {
+      try {
+        console.log(`🤖 Aplicando validação IA final para: ${result.title}`);
+        const aiValidation = await validateWithAI(result);
+
+        if (aiValidation.isValid) {
+          console.log(`✅ ${result.title} - APROVADO pela IA: ${aiValidation.reason}`);
+          aiValidatedResults.push({
+            ...result,
+            aiValidation: aiValidation
+          });
+        } else {
+          console.log(`❌ ${result.title} - REJEITADO pela IA: ${aiValidation.reason}`);
+        }
+      } catch (aiError) {
+        console.log(`🤔 ${result.title} - Erro na IA, mantendo por segurança`);
+        // Em caso de erro na IA, manter o resultado (fallback permissivo)
+        aiValidatedResults.push({
+          ...result,
+          aiValidation: {
+            isValid: true,
+            reason: 'Erro na validação IA - mantido por segurança',
+            confidence: 30
+          }
+        });
+      }
+    }
+
+    console.log(`🎯 Após validação IA: ${aiValidatedResults.length} empresas aprovadas de ${validResults.length} candidatos`);
+
+    // Salvar apenas empresas aprovadas pela IA
+    if (aiValidatedResults.length > 0) {
       const timestamp = Date.now();
 
-      for (const result of validResults) {
+      for (const result of aiValidatedResults) {
         const key = `company:${Buffer.from(result.url).toString('base64').substring(0, 50)}`;
 
         await storage.saveCompany(key, {
@@ -428,25 +460,25 @@ export default async function handler(req, res) {
         neighborhood,
         businessType: business,
         completedAt: timestamp,
-        resultsCount: validResults.length
+        resultsCount: aiValidatedResults.length
       });
 
-      // Cachear o resultado para futuras buscas
+      // Cachear apenas os resultados aprovados
       await storage.setCachedSearchResult(searchTerm, {
-        results: validResults,
+        results: aiValidatedResults,
         timestamp
       });
 
       // Atualizar estatísticas
       await storage.incrementStat('totalSearches', 1);
-      await storage.incrementStat('totalResults', validResults.length);
-      await storage.incrementNeighborhoodHits(neighborhood, validResults.length);
-      await storage.incrementBusinessHits(business, validResults.length);
+      await storage.incrementStat('totalResults', aiValidatedResults.length);
+      await storage.incrementNeighborhoodHits(neighborhood, aiValidatedResults.length);
+      await storage.incrementBusinessHits(business, aiValidatedResults.length);
 
       // Atualizar sistema de aprendizado
-      await updateLearning(searchTerm, neighborhood, business, 'google_search', validResults.length);
+      await updateLearning(searchTerm, neighborhood, business, 'google_search', aiValidatedResults.length);
     } else {
-      // Mesmo sem resultados, marcar busca como concluída e atualizar aprendizado
+      // Mesmo sem resultados aprovados, marcar busca como concluída
       const timestamp = Date.now();
       await storage.saveCompany(existingSearchKey, {
         searchTerm,
@@ -833,11 +865,42 @@ async function performSingleSearch(searchIndex) {
    }
  }
 
- // Salvar resultados
- if (validatedResults.length > 0) {
+ // Aplicar validação IA final para buscas paralelas
+ const aiValidatedResults = [];
+ for (const result of validatedResults) {
+   try {
+     console.log(`🤖 Validando empresa paralela: ${result.title}`);
+     const aiValidation = await validateWithAI(result);
+
+     if (aiValidation.isValid) {
+       console.log(`✅ ${result.title} - Aprovado`);
+       aiValidatedResults.push({
+         ...result,
+         aiValidation: aiValidation
+       });
+     } else {
+       console.log(`❌ ${result.title} - Rejeitado: ${aiValidation.reason}`);
+     }
+   } catch (aiError) {
+     console.log(`🤔 ${result.title} - IA falhou, mantendo`);
+     aiValidatedResults.push({
+       ...result,
+       aiValidation: {
+         isValid: true,
+         reason: 'Erro na validação IA - mantido por segurança',
+         confidence: 30
+       }
+     });
+   }
+ }
+
+ console.log(`🎯 Busca paralela: ${aiValidatedResults.length} empresas aprovadas de ${validatedResults.length} candidatos`);
+
+ // Salvar apenas empresas aprovadas pela IA
+ if (aiValidatedResults.length > 0) {
    const timestamp = Date.now();
 
-   for (const result of validatedResults) {
+   for (const result of aiValidatedResults) {
      const key = `company:${Buffer.from(result.url).toString('base64').substring(0, 50)}`;
      await storage.saveCompany(key, {
        ...result,
@@ -853,20 +916,20 @@ async function performSingleSearch(searchIndex) {
      neighborhood,
      businessType: business,
      completedAt: timestamp,
-     resultsCount: validatedResults.length
+     resultsCount: aiValidatedResults.length
    });
 
    await storage.setCachedSearchResult(searchTerm, {
-     results: validatedResults,
+     results: aiValidatedResults,
      timestamp
    });
 
    await storage.incrementStat('totalSearches', 1);
-   await storage.incrementStat('totalResults', validatedResults.length);
-   await storage.incrementNeighborhoodHits(neighborhood, validatedResults.length);
-   await storage.incrementBusinessHits(business, validatedResults.length);
+   await storage.incrementStat('totalResults', aiValidatedResults.length);
+   await storage.incrementNeighborhoodHits(neighborhood, aiValidatedResults.length);
+   await storage.incrementBusinessHits(business, aiValidatedResults.length);
 
-   await updateLearning(searchTerm, neighborhood, business, 'google_search', validatedResults.length);
+   await updateLearning(searchTerm, neighborhood, business, 'google_search', aiValidatedResults.length);
  } else {
    const timestamp = Date.now();
    await storage.saveCompany(existingSearchKey, {
