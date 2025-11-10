@@ -1,7 +1,6 @@
 import { storage } from './storage.js';
-import { chromium } from 'playwright';
-import fetch from 'node-fetch';
-import * as cheerio from 'cheerio';
+import chromium from '@sparticuz/chromium-min';
+import puppeteer from 'puppeteer-core';
 
 const NEIGHBORHOODS = [
   "Aldeota", "Meireles", "Mucuripe", "Varjota", "Papicu",
@@ -30,22 +29,30 @@ export default async function handler(req, res) {
 
     let results = [];
 
-    // Usar Playwright com Chromium otimizado para Vercel
+    // Usar Puppeteer com configuração otimizada para Vercel
     let browser;
     try {
-      browser = await chromium.launch({
-        headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-blink-features=AutomationControlled',
-          '--disable-web-security',
-          '--disable-features=VizDisplayCompositor'
-        ],
-        executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined
-      });
+      console.log('🚀 Iniciando browser...');
+
+      if (process.env.VERCEL) {
+        // Configuração para Vercel (produção)
+        browser = await puppeteer.launch({
+          args: chromium.args,
+          defaultViewport: chromium.defaultViewport,
+          executablePath: await chromium.executablePath(),
+          headless: chromium.headless,
+        });
+      } else {
+        // Configuração para desenvolvimento local
+        browser = await puppeteer.launch({
+          headless: true,
+          args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+      }
 
       const page = await browser.newPage();
+
+      // Configurar headers para simular navegador real
       await page.setExtraHTTPHeaders({
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -53,124 +60,110 @@ export default async function handler(req, res) {
         'DNT': '1',
         'Connection': 'keep-alive',
         'Upgrade-Insecure-Requests': '1',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
       });
+
+      // Setar user agent
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
       // Buscar no Google
-      const googleUrl = `https://www.google.com/search?q=${encodeURIComponent(searchTerm)}&num=10&hl=pt-BR`;
-      console.log(`🌐 Acessando: ${googleUrl}`);
+      const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchTerm)}&num=10&hl=pt-BR`;
+      console.log(`🌐 Acessando: ${searchUrl}`);
 
-      await page.goto(googleUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await page.waitForTimeout(2000);
+      const response = await page.goto(searchUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000
+      });
 
-      // Extrair resultados
+      if (!response.ok()) {
+        throw new Error(`HTTP ${response.status()}: ${response.statusText()}`);
+      }
+
+      // Aguardar carregamento dos resultados
+      await page.waitForTimeout(3000);
+
+      console.log('📄 Página carregada, extraindo resultados...');
+
+      // Extrair resultados usando JavaScript na página
       results = await page.evaluate(() => {
         const extractedResults = [];
-        const allLinks = Array.from(document.querySelectorAll('a[href]')).filter(a => {
-          const href = a.href;
-          return href &&
-                 href.startsWith('http') &&
-                 !href.includes('google.com') &&
-                 !href.includes('youtube.com') &&
-                 !href.includes('wikipedia.org') &&
-                 !href.includes('facebook.com') &&
-                 !href.includes('instagram.com') &&
-                 !href.includes('linkedin.com') &&
-                 !href.includes('googleusercontent.com') &&
-                 !href.includes('translate.google.com') &&
-                 !href.includes('maps.google.com') &&
-                 !href.includes('books.google.com') &&
-                 !href.includes('news.google.com');
-        });
 
-        console.log(`🔍 Encontrados ${allLinks.length} links válidos na página...`);
+        // Função auxiliar para limpar texto
+        const cleanText = (text) => text?.trim().replace(/\s+/g, ' ') || '';
 
-        for (let i = 0; i < Math.min(allLinks.length, 8); i++) {
-          const link = allLinks[i];
-          const title = link.textContent?.trim() || link.querySelector('h3')?.textContent?.trim() || '';
+        // Selecionar todos os resultados de busca
+        const resultElements = document.querySelectorAll('div.g, div[data-ved], div.yuRUbf');
 
-          // Tentar encontrar o título no elemento pai se não estiver no link
-          let finalTitle = title;
-          if (!finalTitle) {
-            const parent = link.closest('div.g') || link.closest('div[data-ved]');
-            if (parent) {
-              const h3 = parent.querySelector('h3');
-              if (h3) finalTitle = h3.textContent?.trim();
+        for (let i = 0; i < Math.min(resultElements.length, 8); i++) {
+          const element = resultElements[i];
+
+          // Extrair link
+          const linkElement = element.querySelector('a[href]');
+          if (!linkElement) continue;
+
+          const url = linkElement.href;
+          if (!url || !url.startsWith('http') ||
+              url.includes('google.com') ||
+              url.includes('youtube.com') ||
+              url.includes('facebook.com') ||
+              url.includes('instagram.com') ||
+              url.includes('wikipedia.org') ||
+              url.includes('linkedin.com')) {
+            continue;
+          }
+
+          // Extrair título
+          let title = '';
+          const titleSelectors = ['h3', '.LC20lb', '.DKV0Md'];
+          for (const selector of titleSelectors) {
+            const titleEl = element.querySelector(selector);
+            if (titleEl) {
+              title = cleanText(titleEl.textContent);
+              if (title) break;
             }
           }
 
-          if (finalTitle && finalTitle.length > 3) {
-            // Extrair descrição do snippet do Google
-            let description = '';
-            const parent = link.closest('div.g') || link.closest('div[data-ved]');
-            if (parent) {
-              const snippet = parent.querySelector('span[data-ved]') || parent.querySelector('.VwiC3b') || parent.querySelector('span');
-              if (snippet) {
-                description = snippet.textContent?.trim() || '';
-              }
-            }
+          // Se não encontrou título específico, usar o texto do link
+          if (!title) {
+            title = cleanText(linkElement.textContent);
+          }
 
+          // Extrair descrição
+          let description = '';
+          const descSelectors = ['.VwiC3b', '.aCOpRe', 'span[data-ved]', '.IsZvec'];
+          for (const selector of descSelectors) {
+            const descEl = element.querySelector(selector);
+            if (descEl) {
+              description = cleanText(descEl.textContent);
+              if (description) break;
+            }
+          }
+
+          // Validar resultado
+          if (title && title.length > 3 && url) {
             extractedResults.push({
-              title: finalTitle,
-              url: link.href,
-              description: description,
-              position: i + 1
+              title: title.substring(0, 100),
+              url: url,
+              description: description.substring(0, 200),
+              position: extractedResults.length + 1
             });
-
-            if (extractedResults.length >= 6) break;
           }
+
+          // Limitar a 6 resultados
+          if (extractedResults.length >= 6) break;
         }
 
-        console.log(`📊 Total de resultados válidos extraídos: ${extractedResults.length}`);
         return extractedResults;
       });
+
+      console.log(`📊 Extraídos ${results.length} resultados válidos`);
 
       await browser.close();
 
     } catch (browserError) {
-      console.error('❌ Erro no browser:', browserError);
-      // Fallback para fetch + cheerio se Playwright falhar
-      console.log('🔄 Tentando fallback com fetch + cheerio...');
-
-      const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchTerm)}&num=10`;
-      const response = await fetch(searchUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'pt-BR,pt;q=0.8,en-US;q=0.5,en;q=0.3',
-          'Accept-Encoding': 'gzip, deflate',
-          'Connection': 'keep-alive',
-          'Upgrade-Insecure-Requests': '1',
-        },
-        timeout: 10000
-      });
-
-      const html = await response.text();
-      const $ = cheerio.load(html);
-
-      // Extrair resultados do Google com cheerio
-      results = [];
-      $('div.g, div[data-ved]').each((index, element) => {
-        if (index >= 8) return;
-
-        const titleEl = $(element).find('h3');
-        const linkEl = $(element).find('a[href]');
-        const descEl = $(element).find('span[data-ved], .VwiC3b').first();
-
-        if (titleEl.length && linkEl.length) {
-          const title = titleEl.text().trim();
-          const url = linkEl.attr('href');
-          const description = descEl.length ? descEl.text().trim() : '';
-
-          if (url && url.startsWith('http') && !url.includes('google.com') && !url.includes('youtube.com')) {
-            results.push({
-              title,
-              url,
-              description,
-              position: index + 1
-            });
-          }
-        }
-      });
+      console.error('❌ Erro no browser:', browserError.message);
+      console.log('❌ Nenhum resultado encontrado - Google pode estar bloqueando');
     }
 
     // Filtrar e validar resultados

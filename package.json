@@ -10,11 +10,10 @@
   "dependencies": {
     "@mistralai/mistralai": "^1.10.0",
     "@google/generative-ai": "^0.21.0",
-    "cheerio": "^1.0.0-rc.12",
+    "@sparticuz/chromium-min": "^126.0.0",
     "dotenv": "^17.2.3",
     "node-fetch": "^3.3.2",
-    "playwright": "^1.40.0",
-    "@sparticuz/chromium": "^119.0.2"
+    "puppeteer-core": "^21.6.1"
   },
   "type": "module"
 } 
