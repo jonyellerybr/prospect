@@ -5,7 +5,8 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+// Use /tmp for Vercel serverless functions
+const DATA_DIR = process.env.VERCEL ? '/tmp' : path.join(__dirname, '..', 'data');
 const COMPANIES_FILE = path.join(DATA_DIR, 'companies.json');
 const STATS_FILE = path.join(DATA_DIR, 'stats.json');
 
