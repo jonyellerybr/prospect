@@ -1,5 +1,5 @@
 import { storage } from './storage.js';
-import { analyzeCompany, generateProspectingReport } from './ai.js';
+import { analyzeCompany, generateProspectingReport, analyzeCompanyDeep, updateLearning, generateSmartSearchTerms } from './ai.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -48,6 +48,53 @@ export default async function handler(req, res) {
         success: true,
         report: report,
         companiesAnalyzed: recentCompanies.length
+      });
+    }
+
+    if (action === 'analyze_company_deep' && companyId) {
+      // Buscar empresa específica
+      const company = await storage.getCompany(companyId);
+
+      if (!company) {
+        return res.status(404).json({ error: 'Empresa não encontrada' });
+      }
+
+      // Análise profunda com IA
+      const analysis = await analyzeCompanyDeep(company);
+
+      // Salvar análise profunda
+      company.deepAnalysis = analysis;
+      await storage.saveCompany(companyId, company);
+
+      return res.status(200).json({
+        success: true,
+        analysis: analysis
+      });
+    }
+
+    if (action === 'generate_smart_terms') {
+      const maxTerms = req.body.maxTerms || 30;
+      const searchTerms = await generateSmartSearchTerms(maxTerms);
+
+      return res.status(200).json({
+        success: true,
+        searchTerms: searchTerms,
+        totalTerms: searchTerms.length
+      });
+    }
+
+    if (action === 'update_learning') {
+      const { searchTerm, neighborhood, businessType, strategy, foundCompanies } = req.body;
+
+      if (!searchTerm || !neighborhood || !businessType || !strategy) {
+        return res.status(400).json({ error: 'Parâmetros obrigatórios: searchTerm, neighborhood, businessType, strategy' });
+      }
+
+      const learning = await updateLearning(searchTerm, neighborhood, businessType, strategy, foundCompanies || 0);
+
+      return res.status(200).json({
+        success: true,
+        learning: learning
       });
     }
 

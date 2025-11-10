@@ -9,6 +9,7 @@ const __dirname = path.dirname(__filename);
 const DATA_DIR = process.env.VERCEL ? '/tmp' : path.join(__dirname, '..', 'data');
 const COMPANIES_FILE = path.join(DATA_DIR, 'companies.json');
 const STATS_FILE = path.join(DATA_DIR, 'stats.json');
+const LEARNING_FILE = path.join(DATA_DIR, 'learning.json');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -26,6 +27,18 @@ if (!fs.existsSync(STATS_FILE)) {
     totalResults: 0,
     neighborhoods: {},
     businesses: {}
+  }));
+}
+
+if (!fs.existsSync(LEARNING_FILE)) {
+  fs.writeFileSync(LEARNING_FILE, JSON.stringify({
+    successfulSearches: [],
+    failedSearches: [],
+    bestNeighborhoods: {},
+    bestBusinessTypes: {},
+    bestStrategies: {},
+    totalSearches: 0,
+    successRate: 0
   }));
 }
 
@@ -134,6 +147,35 @@ export const storage = {
       return true;
     } catch (error) {
       console.error('Error incrementing business hits:', error);
+      return false;
+    }
+  },
+
+  // Learning data storage
+  async getLearningData() {
+    try {
+      const data = fs.readFileSync(LEARNING_FILE, 'utf8');
+      return JSON.parse(data);
+    } catch (error) {
+      console.error('Error reading learning data:', error);
+      return {
+        successfulSearches: [],
+        failedSearches: [],
+        bestNeighborhoods: {},
+        bestBusinessTypes: {},
+        bestStrategies: {},
+        totalSearches: 0,
+        successRate: 0
+      };
+    }
+  },
+
+  async saveLearningData(data) {
+    try {
+      fs.writeFileSync(LEARNING_FILE, JSON.stringify(data, null, 2));
+      return true;
+    } catch (error) {
+      console.error('Error saving learning data:', error);
       return false;
     }
   }

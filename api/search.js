@@ -1,4 +1,5 @@
 import { storage } from './storage.js';
+import { updateLearning } from './ai.js';
 
 // URL to the Chromium binary package hosted in /public, if not in production, use a fallback URL
 // alternatively, you can host the chromium-pack.tar file elsewhere and update the URL below
@@ -252,7 +253,7 @@ export default async function handler(req, res) {
       (r.description.length > 10 || r.title.length > 5)
     );
 
-    // Salvar no JSON storage
+    // Salvar no JSON storage e atualizar aprendizado
     if (validResults.length > 0) {
       const timestamp = Date.now();
 
@@ -273,6 +274,12 @@ export default async function handler(req, res) {
       await storage.incrementStat('totalResults', validResults.length);
       await storage.incrementNeighborhoodHits(neighborhood, validResults.length);
       await storage.incrementBusinessHits(business, validResults.length);
+
+      // Atualizar sistema de aprendizado
+      await updateLearning(searchTerm, neighborhood, business, 'google_search', validResults.length);
+    } else {
+      // Mesmo sem resultados, atualizar aprendizado para estratégia pouco efetiva
+      await updateLearning(searchTerm, neighborhood, business, 'google_search', 0);
     }
 
     return res.status(200).json({
