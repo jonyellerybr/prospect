@@ -1,6 +1,31 @@
 import { storage } from './storage.js';
 import chromium from '@sparticuz/chromium-min';
-import puppeteer from 'puppeteer-core';
+import puppeteerCore from 'puppeteer-core';
+import puppeteer from 'puppeteer';
+
+export const dynamic = 'force-dynamic';
+
+const remoteExecutablePath =
+  'https://github.com/Sparticuz/chromium/releases/download/v121.0.0/chromium-v121.0.0-pack.tar';
+
+let browser;
+async function getBrowser() {
+  if (browser) return browser;
+
+  if (process.env.NEXT_PUBLIC_VERCEL_ENVIRONMENT === 'production') {
+    browser = await puppeteerCore.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath(remoteExecutablePath),
+      headless: true,
+    });
+  } else {
+    browser = await puppeteer.launch({
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      headless: true,
+    });
+  }
+  return browser;
+}
 
 const NEIGHBORHOODS = [
   "Aldeota", "Meireles", "Mucuripe", "Varjota", "Papicu",
@@ -30,25 +55,9 @@ export default async function handler(req, res) {
     let results = [];
 
     // Usar Puppeteer com configuração otimizada para Vercel
-    let browser;
     try {
       console.log('🚀 Iniciando browser...');
-
-      if (process.env.VERCEL) {
-        // Configuração para Vercel (produção)
-        browser = await puppeteer.launch({
-          args: chromium.args,
-          defaultViewport: chromium.defaultViewport,
-          executablePath: await chromium.executablePath(),
-          headless: chromium.headless,
-        });
-      } else {
-        // Configuração para desenvolvimento local
-        browser = await puppeteer.launch({
-          headless: true,
-          args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
-      }
+      browser = await getBrowser();
 
       const page = await browser.newPage();
 
@@ -158,8 +167,6 @@ export default async function handler(req, res) {
       });
 
       console.log(`📊 Extraídos ${results.length} resultados válidos`);
-
-      await browser.close();
 
     } catch (browserError) {
       console.error('❌ Erro no browser:', browserError.message);
