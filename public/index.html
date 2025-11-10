@@ -74,6 +74,8 @@
                         <div id="current-search" class="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg">
                             Aguardando início...
                         </div>
+                        <div id="status-messages" class="text-xs text-gray-500 mt-2 space-y-1 max-h-20 overflow-y-auto">
+                        </div>
                     </div>
                 </div>
             </div>
@@ -146,7 +148,8 @@
             progressPercent: document.getElementById('progress-percent'),
             currentSearch: document.getElementById('current-search'),
             resultsContainer: document.getElementById('results-container'),
-            maxSearchesInput: document.getElementById('max-searches')
+            maxSearchesInput: document.getElementById('max-searches'),
+            statusMessages: document.getElementById('status-messages')
         };
 
         // Start prospecting
@@ -174,6 +177,16 @@
             elements.stopBtn.disabled = true;
             elements.statusBadge.className = 'px-3 py-1 bg-gray-200 text-gray-700 rounded-full text-sm';
             elements.statusBadge.innerHTML = '<i class="fas fa-pause"></i> Parado';
+            addStatusMessage('Prospecção parada pelo usuário');
+        }
+
+        function addStatusMessage(message) {
+            const time = new Date().toLocaleTimeString();
+            const div = document.createElement('div');
+            div.className = 'text-xs';
+            div.innerHTML = `<span class="text-gray-400">${time}:</span> ${message}`;
+            elements.statusMessages.appendChild(div);
+            elements.statusMessages.scrollTop = elements.statusMessages.scrollHeight;
         }
 
         async function performSearch() {
@@ -207,22 +220,31 @@
                         </small>
                     `;
 
+                    addStatusMessage(`Encontrados ${data.resultsFound} resultados para "${data.searchTerm}"`);
+
                     if (data.resultsFound > 0) {
                         addResults(data.results);
+                        addStatusMessage(`${data.resultsFound} empresas adicionadas à lista`);
                     }
 
                     currentSearchIndex++;
-                    
+
                     if (isRunning && currentSearchIndex < maxSearches) {
+                        addStatusMessage(`Aguardando 5 segundos para próxima busca...`);
                         setTimeout(performSearch, 5000); // 5s entre buscas
                     } else {
+                        addStatusMessage('Prospecção concluída!');
                         stopProspecting();
                         loadStats();
                     }
                 } else {
                     console.error('Erro:', data.error);
+                    addStatusMessage(`Erro na busca: ${data.error}`);
                     currentSearchIndex++;
-                    if (isRunning) setTimeout(performSearch, 5000);
+                    if (isRunning) {
+                        addStatusMessage('Tentando próxima busca em 5 segundos...');
+                        setTimeout(performSearch, 5000);
+                    }
                 }
 
             } catch (error) {

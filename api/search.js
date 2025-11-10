@@ -1,6 +1,6 @@
-import chromium from '@sparticuz/chromium';
-import puppeteer from 'puppeteer-core';
 import { storage } from './storage.js';
+import fetch from 'node-fetch';
+import * as cheerio from 'cheerio';
 
 const NEIGHBORHOODS = [
   "Aldeota", "Meireles", "Mucuripe", "Varjota", "Papicu",
@@ -27,62 +27,57 @@ export default async function handler(req, res) {
 
     console.log(`🔍 Buscando: ${searchTerm}`);
 
-    // Inicializar Puppeteer com Chromium externo
-    const browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
+    // Usar scraping direto com fetch + cheerio (mais leve para Vercel)
+    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchTerm)}&num=10`;
+
+    const response = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'pt-BR,pt;q=0.8,en-US;q=0.5,en;q=0.3',
+        'Accept-Encoding': 'gzip, deflate',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+      },
+      timeout: 10000
     });
 
-    const page = await browser.newPage();
+    const html = await response.text();
+    const $ = cheerio.load(html);
 
-    // Configurar cabeçalhos
-    await page.setExtraHTTPHeaders({
-      'Accept-Language': 'pt-BR,pt;q=0.9',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    });
+    // Extrair resultados do Google
+    const results = [];
+    $('div.g').each((index, element) => {
+      if (index >= 8) return; // Limitar a 8 resultados
 
-    // Buscar no Google
-    await page.goto(`https://www.google.com/search?q=${encodeURIComponent(searchTerm)}`, {
-      waitUntil: 'networkidle0',
-      timeout: 30000
-    });
+      const titleEl = $(element).find('h3');
+      const linkEl = $(element).find('a[href]');
+      const descEl = $(element).find('span[data-ved], div[data-ved]').first();
 
-    // Extrair resultados
-    const results = await page.evaluate(() => {
-      const items = [];
-      const searchResults = document.querySelectorAll('div.g');
+      if (titleEl.length && linkEl.length) {
+        const title = titleEl.text().trim();
+        const url = linkEl.attr('href');
+        const description = descEl.length ? descEl.text().trim() : '';
 
-      searchResults.forEach((result, index) => {
-        if (index >= 8) return;
-
-        const titleEl = result.querySelector('h3');
-        const linkEl = result.querySelector('a');
-        const descEl = result.querySelector('div.VwiC3b');
-
-        if (titleEl && linkEl) {
-          items.push({
-            title: titleEl.textContent,
-            url: linkEl.href,
-            description: descEl ? descEl.textContent : '',
+        // Filtrar URLs válidas
+        if (url && url.startsWith('http') && !url.includes('google.com') && !url.includes('youtube.com')) {
+          results.push({
+            title,
+            url,
+            description,
             position: index + 1
           });
         }
-      });
-
-      return items;
+      }
     });
 
-    await browser.close();
-
     // Filtrar e validar resultados
-    const validResults = results.filter(r => 
+    const validResults = results.filter(r =>
       r.url &&
       !r.url.includes('google.com') &&
       !r.url.includes('youtube.com') &&
       !r.url.includes('facebook.com') &&
-      (r.description.length > 50 || r.title.length > 20)
+      (r.description.length > 20 || r.title.length > 10)
     );
 
     // Salvar no JSON storage
