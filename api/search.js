@@ -298,7 +298,7 @@ export default async function handler(req, res) {
           await new Promise(resolve => setTimeout(resolve, 1000));
 
         } catch (pageError) {
-          console.warn(`Erro na página ${pageNum}:`, pageError.message);
+          console.warn(`Erro na página ${pageNum}: ${pageError.message}`);
           continue;
         }
       }
