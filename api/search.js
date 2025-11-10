@@ -306,8 +306,6 @@ export default async function handler(req, res) {
       console.log(`📊 Total extraído de todas as páginas: ${allResults.length} resultados`);
       results = allResults;
 
-      // Removido código duplicado - extração já feita acima no loop de páginas
-
       // Validação inteligente usando IA (removidos filtros hardcoded)
       const validatedResults = [];
       for (const result of results) {
