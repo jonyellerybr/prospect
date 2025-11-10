@@ -10,6 +10,17 @@ export default async function handler(req, res) {
     const { action, companyId, limit = 10 } = req.body;
 
     if (action === 'analyze_company' && companyId) {
+      // Verificar cache primeiro
+      const cachedAnalysis = await storage.getCachedCompanyAnalysis(companyId);
+      if (cachedAnalysis) {
+        console.log(`⚡ Análise em cache encontrada para empresa: ${companyId}`);
+        return res.status(200).json({
+          success: true,
+          analysis: cachedAnalysis,
+          cached: true
+        });
+      }
+
       // Buscar empresa específica
       const company = await storage.getCompany(companyId);
 
@@ -20,7 +31,10 @@ export default async function handler(req, res) {
       // Analisar empresa com IA
       const analysis = await analyzeCompany(company);
 
-      // Salvar análise
+      // Salvar análise no cache
+      await storage.setCachedCompanyAnalysis(companyId, analysis);
+
+      // Salvar análise na empresa
       company.aiAnalysis = analysis;
       await storage.saveCompany(companyId, company);
 
@@ -52,6 +66,17 @@ export default async function handler(req, res) {
     }
 
     if (action === 'analyze_company_deep' && companyId) {
+      // Verificar cache primeiro
+      const cachedAnalysis = await storage.getCachedCompanyAnalysis(`${companyId}_deep`);
+      if (cachedAnalysis) {
+        console.log(`⚡ Análise profunda em cache encontrada para empresa: ${companyId}`);
+        return res.status(200).json({
+          success: true,
+          analysis: cachedAnalysis,
+          cached: true
+        });
+      }
+
       // Buscar empresa específica
       const company = await storage.getCompany(companyId);
 
@@ -62,7 +87,10 @@ export default async function handler(req, res) {
       // Análise profunda com IA
       const analysis = await analyzeCompanyDeep(company);
 
-      // Salvar análise profunda
+      // Salvar análise no cache
+      await storage.setCachedCompanyAnalysis(`${companyId}_deep`, analysis);
+
+      // Salvar análise profunda na empresa
       company.deepAnalysis = analysis;
       await storage.saveCompany(companyId, company);
 

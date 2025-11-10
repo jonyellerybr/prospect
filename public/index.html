@@ -175,10 +175,76 @@
                     <i class="fas fa-list text-green-600 mr-2"></i>
                     Empresas Encontradas
                 </h2>
-                <button id="load-more-btn" class="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-600 transition-colors">
-                    <i class="fas fa-plus mr-1"></i>Carregar Mais
-                </button>
+                <div class="flex gap-2">
+                    <button id="filter-btn" class="bg-gray-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-600 transition-colors">
+                        <i class="fas fa-filter mr-1"></i>Filtros
+                    </button>
+                    <button id="load-more-btn" class="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-600 transition-colors">
+                        <i class="fas fa-plus mr-1"></i>Carregar Mais
+                    </button>
+                </div>
             </div>
+
+            <!-- Advanced Filters -->
+            <div id="filters-container" class="mb-4 p-4 bg-gray-50 rounded-lg hidden">
+                <div class="grid md:grid-cols-4 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Bairro</label>
+                        <select id="filter-neighborhood" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                            <option value="">Todos</option>
+                            <option value="Aldeota">Aldeota</option>
+                            <option value="Meireles">Meireles</option>
+                            <option value="Mucuripe">Mucuripe</option>
+                            <option value="Varjota">Varjota</option>
+                            <option value="Papicu">Papicu</option>
+                            <option value="Centro">Centro</option>
+                            <option value="Benfica">Benfica</option>
+                            <option value="Messejana">Messejana</option>
+                            <option value="Parangaba">Parangaba</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Tipo de Negócio</label>
+                        <select id="filter-business" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                            <option value="">Todos</option>
+                            <option value="restaurante">Restaurante</option>
+                            <option value="advogado">Advogado</option>
+                            <option value="dentista">Dentista</option>
+                            <option value="salão beleza">Salão de Beleza</option>
+                            <option value="academia">Academia</option>
+                            <option value="pet shop">Pet Shop</option>
+                            <option value="mecânica">Mecânica</option>
+                            <option value="loja roupas">Loja de Roupas</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Data</label>
+                        <select id="filter-date" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                            <option value="">Todas</option>
+                            <option value="today">Hoje</option>
+                            <option value="week">Última semana</option>
+                            <option value="month">Último mês</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Ordenar por</label>
+                        <select id="sort-by" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                            <option value="date">Data (mais recente)</option>
+                            <option value="name">Nome (A-Z)</option>
+                            <option value="neighborhood">Bairro</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="flex gap-2 mt-3">
+                    <button id="apply-filters" class="bg-green-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-600 transition-colors">
+                        <i class="fas fa-check mr-1"></i>Aplicar
+                    </button>
+                    <button id="clear-filters" class="bg-red-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-red-600 transition-colors">
+                        <i class="fas fa-times mr-1"></i>Limpar
+                    </button>
+                </div>
+            </div>
+
             <div id="results-container" class="space-y-3 max-h-96 overflow-y-auto">
                 <p class="text-gray-500 text-center py-8">Nenhuma empresa encontrada ainda</p>
             </div>
@@ -195,6 +261,18 @@
         let searchInterval = null;
         let currentOffset = 0;
         const resultsPerPage = 20;
+
+        // Filter state
+        let currentFilters = {
+            neighborhood: '',
+            businessType: '',
+            dateRange: '',
+            sortBy: 'date'
+        };
+
+        // Offline support
+        let isOnline = navigator.onLine;
+        let offlineData = null;
 
         const elements = {
             startBtn: document.getElementById('start-btn'),
@@ -216,7 +294,15 @@
             learningFailures: document.getElementById('learning-failures'),
             topLearningNeighborhoods: document.getElementById('top-learning-neighborhoods'),
             toggleSearchesBtn: document.getElementById('toggle-searches-btn'),
-            searchesContainer: document.getElementById('searches-container')
+            searchesContainer: document.getElementById('searches-container'),
+            filterBtn: document.getElementById('filter-btn'),
+            filtersContainer: document.getElementById('filters-container'),
+            filterNeighborhood: document.getElementById('filter-neighborhood'),
+            filterBusiness: document.getElementById('filter-business'),
+            filterDate: document.getElementById('filter-date'),
+            sortBy: document.getElementById('sort-by'),
+            applyFilters: document.getElementById('apply-filters'),
+            clearFilters: document.getElementById('clear-filters')
         };
 
         // Start prospecting
@@ -224,6 +310,9 @@
         elements.stopBtn.addEventListener('click', stopProspecting);
         elements.loadMoreBtn.addEventListener('click', loadMoreResults);
         elements.toggleSearchesBtn.addEventListener('click', toggleSearches);
+        elements.filterBtn.addEventListener('click', toggleFilters);
+        elements.applyFilters.addEventListener('click', applyFilters);
+        elements.clearFilters.addEventListener('click', clearFilters);
 
         async function startProspecting() {
             if (isRunning) return;
@@ -418,16 +507,33 @@
             }
         }
 
-        async function loadResults(append = false) {
+        async function loadResults(append = false, applyCurrentFilters = false) {
             try {
                 const limit = append ? resultsPerPage : 50;
                 const offset = append ? currentOffset : 0;
-                const response = await fetch(`/api/results?limit=${limit}&offset=${offset}&includeSearches=true`);
+
+                // Build query parameters
+                let queryParams = `limit=${limit}&offset=${offset}&includeSearches=true`;
+
+                if (applyCurrentFilters) {
+                    if (currentFilters.neighborhood) queryParams += `&neighborhood=${encodeURIComponent(currentFilters.neighborhood)}`;
+                    if (currentFilters.businessType) queryParams += `&businessType=${encodeURIComponent(currentFilters.businessType)}`;
+                    if (currentFilters.dateRange) queryParams += `&dateRange=${encodeURIComponent(currentFilters.dateRange)}`;
+                    if (currentFilters.sortBy) queryParams += `&sortBy=${encodeURIComponent(currentFilters.sortBy)}`;
+                }
+
+                const response = await fetch(`/api/results?${queryParams}`);
                 const data = await response.json();
 
                 if (data.success) {
+                    if (!append) {
+                        elements.resultsContainer.innerHTML = '';
+                    }
+
                     if (data.results.length > 0) {
                         addResults(data.results, append);
+                    } else if (!append) {
+                        elements.resultsContainer.innerHTML = '<p class="text-gray-500 text-center py-8">Nenhum resultado encontrado com os filtros aplicados</p>';
                     }
 
                     elements.resultsTotal.textContent = data.total;
@@ -487,6 +593,183 @@
             });
         }
 
+        function toggleFilters() {
+            const isHidden = elements.filtersContainer.classList.contains('hidden');
+            if (isHidden) {
+                elements.filtersContainer.classList.remove('hidden');
+                elements.filterBtn.innerHTML = '<i class="fas fa-times mr-1"></i>Ocultar Filtros';
+            } else {
+                elements.filtersContainer.classList.add('hidden');
+                elements.filterBtn.innerHTML = '<i class="fas fa-filter mr-1"></i>Filtros';
+            }
+        }
+
+        function applyFilters() {
+            currentFilters.neighborhood = elements.filterNeighborhood.value;
+            currentFilters.businessType = elements.filterBusiness.value;
+            currentFilters.dateRange = elements.filterDate.value;
+            currentFilters.sortBy = elements.sortBy.value;
+
+            currentOffset = 0; // Reset pagination
+            loadResults(false, true); // Reload with filters
+            toggleFilters(); // Hide filters
+        }
+
+        function clearFilters() {
+            elements.filterNeighborhood.value = '';
+            elements.filterBusiness.value = '';
+            elements.filterDate.value = '';
+            elements.sortBy.value = 'date';
+
+            currentFilters = {
+                neighborhood: '',
+                businessType: '',
+                dateRange: '',
+                sortBy: 'date'
+            };
+
+            currentOffset = 0;
+            loadResults(false, true);
+            toggleFilters();
+        }
+
+        function handleOnline() {
+            isOnline = true;
+            console.log('Conexão restaurada');
+            addStatusMessage('Conexão com internet restaurada');
+
+            // Reload data when back online
+            loadResults();
+            loadStats();
+        }
+
+        function handleOffline() {
+            isOnline = false;
+            console.log('Sem conexão com internet');
+            addStatusMessage('Modo offline ativado - algumas funcionalidades podem não funcionar');
+
+            // Load cached data
+            loadOfflineData();
+        }
+
+        async function loadOfflineData() {
+            try {
+                const cachedData = localStorage.getItem('prospectOfflineData');
+                if (cachedData) {
+                    offlineData = JSON.parse(cachedData);
+                    console.log('Dados offline carregados');
+
+                    // Show offline indicator
+                    if (!isOnline) {
+                        showOfflineMode();
+                    }
+                }
+            } catch (error) {
+                console.error('Erro ao carregar dados offline:', error);
+            }
+        }
+
+        function showOfflineMode() {
+            // Add offline indicator to header
+            const header = document.querySelector('nav');
+            if (header && !header.querySelector('.offline-indicator')) {
+                const offlineDiv = document.createElement('div');
+                offlineDiv.className = 'offline-indicator px-3 py-1 bg-orange-500 text-white rounded-full text-sm';
+                offlineDiv.innerHTML = '<i class="fas fa-wifi-slash mr-1"></i>Offline';
+                header.querySelector('.flex.items-center.justify-between').appendChild(offlineDiv);
+            }
+
+            // Disable online-only features
+            elements.startBtn.disabled = true;
+            elements.startBtn.title = 'Indisponível no modo offline';
+        }
+
+        function hideOfflineMode() {
+            // Remove offline indicator
+            const indicator = document.querySelector('.offline-indicator');
+            if (indicator) {
+                indicator.remove();
+            }
+
+            // Re-enable features
+            elements.startBtn.disabled = false;
+            elements.startBtn.title = '';
+        }
+
+        // Enhanced loadResults with offline support
+        const originalLoadResults = loadResults;
+        loadResults = async function(append = false, applyCurrentFilters = false) {
+            if (!isOnline && offlineData) {
+                // Use offline data
+                console.log('Usando dados offline');
+
+                let filteredResults = offlineData.results || [];
+
+                // Apply current filters to offline data
+                if (applyCurrentFilters) {
+                    if (currentFilters.neighborhood) {
+                        filteredResults = filteredResults.filter(r => r.neighborhood === currentFilters.neighborhood);
+                    }
+                    if (currentFilters.businessType) {
+                        filteredResults = filteredResults.filter(r => r.businessType === currentFilters.businessType);
+                    }
+                }
+
+                // Apply sorting
+                switch (currentFilters.sortBy) {
+                    case 'name':
+                        filteredResults.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+                        break;
+                    case 'neighborhood':
+                        filteredResults.sort((a, b) => (a.neighborhood || '').localeCompare(b.neighborhood || ''));
+                        break;
+                    case 'date':
+                    default:
+                        filteredResults.sort((a, b) => (b.foundAt || 0) - (a.foundAt || 0));
+                        break;
+                }
+
+                // Paginate
+                const limit = append ? resultsPerPage : 50;
+                const offset = append ? currentOffset : 0;
+                const paginatedResults = filteredResults.slice(offset, offset + limit);
+
+                if (paginatedResults.length > 0) {
+                    addResults(paginatedResults, append);
+                } else if (!append) {
+                    elements.resultsContainer.innerHTML = '<p class="text-gray-500 text-center py-8">Nenhum resultado encontrado (modo offline)</p>';
+                }
+
+                elements.resultsTotal.textContent = filteredResults.length;
+                elements.resultsShown.textContent = append ?
+                    Math.min(currentOffset + paginatedResults.length, filteredResults.length) :
+                    Math.min(paginatedResults.length, filteredResults.length);
+
+                return;
+            }
+
+            // Online mode - call original function and cache results
+            try {
+                await originalLoadResults.call(this, append, applyCurrentFilters);
+
+                // Cache successful responses for offline use
+                if (isOnline && !append) {
+                    const response = await fetch(`/api/results?limit=100&offset=0&includeSearches=true`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.success) {
+                            localStorage.setItem('prospectOfflineData', JSON.stringify(data));
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Erro no modo online, tentando offline:', error);
+                if (offlineData) {
+                    return loadResults.call(this, append, applyCurrentFilters);
+                }
+            }
+        };
+
         async function loadStats() {
             try {
                 const response = await fetch('/api/stats');
@@ -518,6 +801,13 @@
 
         // Auto-refresh stats
         setInterval(loadStats, 30000);
+
+        // Offline support
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+
+        // Load offline data if exists
+        loadOfflineData();
     </script>
 </body>
 </html>

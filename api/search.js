@@ -103,12 +103,47 @@ export default async function handler(req, res) {
    }
 
    try {
-     const { searchIndex = 0, maxSearches = 5 } = req.body;
+     const { searchIndex = 0, maxSearches = 5, parallelSearches = 1 } = req.body;
+
+     // Limitar paralelização para evitar sobrecarga
+     const actualParallel = Math.min(parallelSearches, 3);
+
+     if (actualParallel > 1) {
+       // Modo paralelizado
+       return await performParallelSearches(searchIndex, maxSearches, actualParallel, res);
+     }
+
+     // Modo sequencial (padrão)
+     const { searchIndex: currentIndex, maxSearches: max } = req.body;
 
      // Gerar termo de busca
-     const neighborhood = NEIGHBORHOODS[searchIndex % NEIGHBORHOODS.length];
-     const business = BUSINESS_TYPES[Math.floor(searchIndex / NEIGHBORHOODS.length) % BUSINESS_TYPES.length];
+     const neighborhood = NEIGHBORHOODS[currentIndex % NEIGHBORHOODS.length];
+     const business = BUSINESS_TYPES[Math.floor(currentIndex / NEIGHBORHOODS.length) % BUSINESS_TYPES.length];
      const searchTerm = `${business} ${neighborhood} fortaleza`;
+
+     // Verificar cache primeiro
+     const cachedResult = await storage.getCachedSearchResult(searchTerm);
+     if (cachedResult) {
+       console.log(`⚡ Resultado em cache encontrado: ${searchTerm}`);
+
+       // Atualizar estatísticas mesmo para resultados em cache
+       await storage.incrementStat('totalResults', cachedResult.results.length);
+       await storage.incrementNeighborhoodHits(neighborhood, cachedResult.results.length);
+       await storage.incrementBusinessHits(business, cachedResult.results.length);
+
+       return res.status(200).json({
+         success: true,
+         searchTerm,
+         neighborhood,
+         businessType: business,
+         resultsFound: cachedResult.results.length,
+         results: cachedResult.results,
+         nextSearchIndex: searchIndex + 1,
+         hasMore: searchIndex + 1 < maxSearches,
+         cached: true,
+         message: 'Resultado obtido do cache'
+       });
+     }
 
      // Verificar se já existe busca para este termo
      const existingSearchKey = `search:${Buffer.from(searchTerm).toString('base64')}`;
@@ -117,11 +152,14 @@ export default async function handler(req, res) {
      if (existingSearch && existingSearch.completedAt) {
        console.log(`🔄 Busca já realizada anteriormente: ${searchTerm}`);
 
-       // Buscar resultados associados a esta busca
-       const allCompanies = await storage.getAllCompanies();
-       const relatedResults = allCompanies.filter(company =>
-         company.searchTerm === searchTerm && company.foundAt
-       );
+       // Buscar resultados associados a esta busca usando index otimizado
+       const relatedResults = await storage.getCompaniesBySearchTerm(searchTerm);
+
+       // Cachear o resultado para futuras buscas
+       await storage.setCachedSearchResult(searchTerm, {
+         results: relatedResults,
+         timestamp: Date.now()
+       });
 
        // Atualizar estatísticas mesmo para buscas puladas (não incrementar totalSearches)
        await storage.incrementStat('totalResults', relatedResults.length);
@@ -380,6 +418,12 @@ export default async function handler(req, res) {
         resultsCount: validResults.length
       });
 
+      // Cachear o resultado para futuras buscas
+      await storage.setCachedSearchResult(searchTerm, {
+        results: validResults,
+        timestamp
+      });
+
       // Atualizar estatísticas
       await storage.incrementStat('totalSearches', 1);
       await storage.incrementStat('totalResults', validResults.length);
@@ -390,13 +434,21 @@ export default async function handler(req, res) {
       await updateLearning(searchTerm, neighborhood, business, 'google_search', validResults.length);
     } else {
       // Mesmo sem resultados, marcar busca como concluída e atualizar aprendizado
+      const timestamp = Date.now();
       await storage.saveCompany(existingSearchKey, {
         searchTerm,
         neighborhood,
         businessType: business,
-        completedAt: Date.now(),
+        completedAt: timestamp,
         resultsCount: 0
       });
+
+      // Cachear resultado vazio
+      await storage.setCachedSearchResult(searchTerm, {
+        results: [],
+        timestamp
+      });
+
       await updateLearning(searchTerm, neighborhood, business, 'google_search', 0);
     }
 
@@ -413,11 +465,300 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('❌ Erro na busca:', error);
-    
+
     return res.status(500).json({
       success: false,
       error: error.message,
       searchIndex: req.body.searchIndex
     });
   }
+}
+
+// Função para executar buscas em paralelo
+async function performParallelSearches(startIndex, maxSearches, parallelCount, res) {
+ const results = [];
+ const errors = [];
+
+ console.log(`🚀 Iniciando ${parallelCount} buscas em paralelo a partir do índice ${startIndex}`);
+
+ // Criar promises para buscas paralelas
+ const searchPromises = [];
+ for (let i = 0; i < parallelCount && (startIndex + i) < maxSearches; i++) {
+   const currentIndex = startIndex + i;
+   searchPromises.push(performSingleSearch(currentIndex));
+ }
+
+ try {
+   // Executar todas as buscas em paralelo
+   const searchResults = await Promise.allSettled(searchPromises);
+
+   // Processar resultados
+   searchResults.forEach((result, index) => {
+     if (result.status === 'fulfilled') {
+       results.push(result.value);
+     } else {
+       errors.push({
+         index: startIndex + index,
+         error: result.reason.message
+       });
+     }
+   });
+
+   // Consolidar estatísticas
+   const totalResults = results.reduce((sum, r) => sum + r.resultsFound, 0);
+   const nextIndex = startIndex + parallelCount;
+
+   return res.status(200).json({
+     success: true,
+     parallel: true,
+     searchesPerformed: results.length,
+     totalResults,
+     results: results.flatMap(r => r.results),
+     nextSearchIndex: nextIndex,
+     hasMore: nextIndex < maxSearches,
+     errors: errors.length > 0 ? errors : undefined,
+     message: `Executadas ${results.length} buscas em paralelo`
+   });
+
+ } catch (error) {
+   console.error('❌ Erro nas buscas paralelas:', error);
+   return res.status(500).json({
+     success: false,
+     error: error.message,
+     parallel: true
+   });
+ }
+}
+
+// Função auxiliar para executar uma busca individual
+async function performSingleSearch(searchIndex) {
+ // Gerar termo de busca
+ const neighborhood = NEIGHBORHOODS[searchIndex % NEIGHBORHOODS.length];
+ const business = BUSINESS_TYPES[Math.floor(searchIndex / NEIGHBORHOODS.length) % BUSINESS_TYPES.length];
+ const searchTerm = `${business} ${neighborhood} fortaleza`;
+
+ // Verificar cache primeiro
+ const cachedResult = await storage.getCachedSearchResult(searchTerm);
+ if (cachedResult) {
+   console.log(`⚡ Resultado em cache encontrado: ${searchTerm}`);
+   return {
+     searchTerm,
+     neighborhood,
+     businessType: business,
+     resultsFound: cachedResult.results.length,
+     results: cachedResult.results,
+     cached: true,
+     message: 'Resultado obtido do cache'
+   };
+ }
+
+ // Verificar se já existe busca
+ const existingSearchKey = `search:${Buffer.from(searchTerm).toString('base64')}`;
+ const existingSearch = await storage.getCompany(existingSearchKey);
+
+ if (existingSearch && existingSearch.completedAt) {
+   console.log(`🔄 Busca já realizada: ${searchTerm}`);
+   const relatedResults = await storage.getCompaniesBySearchTerm(searchTerm);
+   return {
+     searchTerm,
+     neighborhood,
+     businessType: business,
+     resultsFound: relatedResults.length,
+     results: relatedResults,
+     skipped: true,
+     message: 'Busca já realizada anteriormente'
+   };
+ }
+
+ // Executar busca real
+ console.log(`🔍 Executando busca: ${searchTerm}`);
+
+ let results = [];
+
+ try {
+   const browser = await getBrowser();
+   const page = await browser.newPage();
+
+   // Configurar headers
+   await page.setExtraHTTPHeaders({
+     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+     'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+     'Accept-Encoding': 'gzip, deflate, br',
+     'DNT': '1',
+     'Connection': 'keep-alive',
+     'Upgrade-Insecure-Requests': '1',
+   });
+
+   await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+   await page.setViewport({ width: 1366, height: 768 });
+   await page.setCookie({
+     name: 'CONSENT',
+     value: 'YES+BR.pt+20150628-20-0',
+     domain: '.google.com'
+   });
+
+   // Buscar no Google
+   const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchTerm)}&num=10&hl=pt-BR`;
+   console.log(`🌐 Acessando: ${searchUrl}`);
+
+   const response = await page.goto(searchUrl, {
+     waitUntil: 'domcontentloaded',
+     timeout: 30000
+   });
+
+   if (!response.ok()) {
+     throw new Error(`HTTP ${response.status()}: ${response.statusText()}`);
+   }
+
+   await page.waitForSelector('div.g, div[data-ved], div.yuRUbf', { timeout: 15000 });
+   await new Promise(resolve => setTimeout(resolve, 2000)); // Reduzido para paralelização
+
+   // Extrair resultados (versão simplificada para paralelização)
+   results = await page.evaluate(() => {
+     const extractedResults = [];
+     const allLinks = Array.from(document.querySelectorAll('a[href]')).filter(a => {
+       const href = a.href;
+       return href &&
+              href.startsWith('http') &&
+              !href.includes('google.com') &&
+              !href.includes('youtube.com') &&
+              !href.includes('wikipedia.org') &&
+              !href.includes('facebook.com') &&
+              !href.includes('instagram.com') &&
+              !href.includes('linkedin.com');
+     });
+
+     for (let i = 0; i < Math.min(allLinks.length, 5); i++) { // Reduzido para paralelização
+       const link = allLinks[i];
+       const title = link.textContent?.trim() || link.querySelector('h3')?.textContent?.trim() || '';
+
+       let finalTitle = title;
+       if (!finalTitle) {
+         const parent = link.closest('div.g') || link.closest('div[data-ved]');
+         if (parent) {
+           const h3 = parent.querySelector('h3');
+           if (h3) finalTitle = h3.textContent?.trim();
+         }
+       }
+
+       if (finalTitle && finalTitle.length > 3) {
+         const parent = link.closest('div.g') || link.closest('div[data-ved]');
+         let description = '';
+         if (parent) {
+           const snippet = parent.querySelector('span[data-ved]') || parent.querySelector('.VwiC3b') || parent.querySelector('span');
+           if (snippet) {
+             description = snippet.textContent?.trim() || '';
+           }
+         }
+
+         extractedResults.push({
+           title: finalTitle.substring(0, 100),
+           url: link.href,
+           description: description.substring(0, 200),
+           position: extractedResults.length + 1
+         });
+
+         if (extractedResults.length >= 4) break; // Reduzido para paralelização
+       }
+     }
+
+     return extractedResults;
+   });
+
+   await page.close();
+
+ } catch (browserError) {
+   console.error('❌ Erro no browser:', browserError.message);
+ }
+
+ // Validação simplificada
+ const validatedResults = [];
+ for (const result of results) {
+   const urlLower = result.url.toLowerCase();
+   const titleLower = result.title.toLowerCase();
+
+   const rejectPatterns = [
+     /lista.*empresa/i, /diretório/i, /notícia/i, /news/i,
+     /facebook\.com/i, /instagram\.com/i, /youtube\.com/i,
+     /mercadolivre/i, /olx/i, /wikipedia/i, /google/i
+   ];
+
+   const shouldReject = rejectPatterns.some(pattern =>
+     pattern.test(urlLower) || pattern.test(titleLower)
+   );
+
+   if (!shouldReject) {
+     const businessIndicators = [
+       /\b(restaurante|advogado|dentista|salão|academia|pet|mecânica|loja)\b/i
+     ];
+
+     const hasBusinessIndicator = businessIndicators.some(pattern =>
+       pattern.test(titleLower) || pattern.test(result.description)
+     );
+
+     if (hasBusinessIndicator) {
+       validatedResults.push(result);
+     }
+   }
+ }
+
+ // Salvar resultados
+ if (validatedResults.length > 0) {
+   const timestamp = Date.now();
+
+   for (const result of validatedResults) {
+     const key = `company:${Buffer.from(result.url).toString('base64').substring(0, 50)}`;
+     await storage.saveCompany(key, {
+       ...result,
+       searchTerm,
+       neighborhood,
+       businessType: business,
+       foundAt: timestamp
+     });
+   }
+
+   await storage.saveCompany(existingSearchKey, {
+     searchTerm,
+     neighborhood,
+     businessType: business,
+     completedAt: timestamp,
+     resultsCount: validatedResults.length
+   });
+
+   await storage.setCachedSearchResult(searchTerm, {
+     results: validatedResults,
+     timestamp
+   });
+
+   await storage.incrementStat('totalSearches', 1);
+   await storage.incrementStat('totalResults', validatedResults.length);
+   await storage.incrementNeighborhoodHits(neighborhood, validatedResults.length);
+   await storage.incrementBusinessHits(business, validatedResults.length);
+
+   await updateLearning(searchTerm, neighborhood, business, 'google_search', validatedResults.length);
+ } else {
+   const timestamp = Date.now();
+   await storage.saveCompany(existingSearchKey, {
+     searchTerm,
+     neighborhood,
+     businessType: business,
+     completedAt: timestamp,
+     resultsCount: 0
+   });
+
+   await storage.setCachedSearchResult(searchTerm, {
+     results: [],
+     timestamp
+   });
+
+   await updateLearning(searchTerm, neighborhood, business, 'google_search', 0);
+ }
+
+ return {
+   searchTerm,
+   neighborhood,
+   businessType: business,
+   resultsFound: validatedResults.length,
+   results: validatedResults
+ };
 }
