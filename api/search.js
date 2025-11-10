@@ -182,6 +182,8 @@ export default async function handler(req, res) {
 
     console.log(`🔍 Buscando: ${searchTerm}`);
 
+    // Record performance metric
+    const searchStartTime = Date.now();
     let results = [];
 
     // Usar Puppeteer com configuração otimizada para Vercel
@@ -496,6 +498,18 @@ export default async function handler(req, res) {
 
       await updateLearning(searchTerm, neighborhood, business, 'google_search', 0);
     }
+
+    // Record search performance
+    const searchDuration = Date.now() - searchStartTime;
+    await storage.updatePerformanceMetric('search_duration', searchDuration);
+    await storage.updatePerformanceMetric('results_per_search', validResults.length);
+    await storage.recordUserAction('search_completed', {
+      searchTerm,
+      neighborhood,
+      businessType,
+      resultsFound: validResults.length,
+      duration: searchDuration
+    });
 
     return res.status(200).json({
       success: true,

@@ -27,6 +27,9 @@ export default async function handler(req, res) {
     // Buscar dados de aprendizado
     const learning = await storage.getLearningData();
 
+    // Buscar analytics
+    const analytics = await storage.getAnalyticsSummary();
+
     return res.status(200).json({
       success: true,
       general: {
@@ -51,6 +54,7 @@ export default async function handler(req, res) {
           .slice(0, 3)
           .map(([name, score]) => ({ name, score }))
       },
+      analytics: analytics,
       topNeighborhoods: neighborhoods,
       topBusinesses: businesses,
       lastUpdate: Date.now()

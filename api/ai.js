@@ -135,7 +135,8 @@ Responda em português brasileiro.`;
       return {
         provider: 'gemini',
         analysis: analysis,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        prediction: await generateConversionPrediction(companyData)
       };
     }
   } catch (error) {
@@ -149,7 +150,8 @@ Responda em português brasileiro.`;
       return {
         provider: 'mistral',
         analysis: analysis,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        prediction: await generateConversionPrediction(companyData)
       };
     }
   } catch (error) {
@@ -160,8 +162,177 @@ Responda em português brasileiro.`;
   return {
     provider: 'fallback',
     analysis: `Empresa: ${companyData.title}\nTipo: ${companyData.businessType}\nBairro: ${companyData.neighborhood}\nPotencial: Médio`,
-    timestamp: Date.now()
+    timestamp: Date.now(),
+    prediction: { score: 50, factors: ['fallback_used'] }
   };
+}
+
+// ==================== SISTEMA DE PREDIÇÃO ====================
+export async function generateConversionPrediction(companyData) {
+  try {
+    // Fatores de predição baseados em dados históricos
+    const factors = [];
+    let score = 50; // Score base
+
+    // Fator 1: Tipo de negócio (baseado em dados de aprendizado)
+    const learning = await loadLearningData();
+    const businessScore = learning.bestBusinessTypes[companyData.businessType] || 0;
+    if (businessScore > 10) {
+      score += 15;
+      factors.push('business_type_high_performance');
+    } else if (businessScore > 5) {
+      score += 5;
+      factors.push('business_type_medium_performance');
+    }
+
+    // Fator 2: Bairro (baseado em dados de aprendizado)
+    const neighborhoodScore = learning.bestNeighborhoods[companyData.neighborhood] || 0;
+    if (neighborhoodScore > 15) {
+      score += 20;
+      factors.push('neighborhood_high_performance');
+    } else if (neighborhoodScore > 8) {
+      score += 10;
+      factors.push('neighborhood_medium_performance');
+    }
+
+    // Fator 3: Presença de contato na descrição
+    if (companyData.description && (
+      companyData.description.includes('telefone') ||
+      companyData.description.includes('contato') ||
+      companyData.description.includes('whatsapp') ||
+      companyData.description.includes('@')
+    )) {
+      score += 10;
+      factors.push('contact_info_available');
+    }
+
+    // Fator 4: Redes sociais (bom sinal para empresas modernas)
+    if (companyData.url && (
+      companyData.url.includes('instagram') ||
+      companyData.url.includes('facebook') ||
+      companyData.url.includes('linkedin')
+    )) {
+      score += 8;
+      factors.push('social_media_presence');
+    }
+
+    // Fator 5: Site profissional
+    if (companyData.url && !companyData.url.includes('instagram') && !companyData.url.includes('facebook')) {
+      score += 12;
+      factors.push('professional_website');
+    }
+
+    // Fator 6: Tamanho do título (empresas com nomes mais descritivos tendem a ser mais estabelecidas)
+    if (companyData.title && companyData.title.length > 20) {
+      score += 5;
+      factors.push('descriptive_business_name');
+    }
+
+    // Limitar score entre 0 e 100
+    score = Math.max(0, Math.min(100, score));
+
+    // Categorizar score
+    let category;
+    if (score >= 80) category = 'excelente';
+    else if (score >= 65) category = 'bom';
+    else if (score >= 45) category = 'médio';
+    else category = 'baixo';
+
+    return {
+      score: Math.round(score),
+      category,
+      factors,
+      confidence: 75, // Confiança do modelo
+      recommendation: getRecommendationForScore(score, companyData.businessType)
+    };
+
+  } catch (error) {
+    console.error('Erro na predição:', error);
+    return {
+      score: 50,
+      category: 'médio',
+      factors: ['error_occurred'],
+      confidence: 0,
+      recommendation: 'Avaliação manual necessária'
+    };
+  }
+}
+
+function getRecommendationForScore(score, businessType) {
+  if (score >= 80) {
+    return `Excelente oportunidade! ${businessType} com alto potencial. Priorize contato imediato.`;
+  } else if (score >= 65) {
+    return `Boa oportunidade. ${businessType} com bom histórico. Contate nos próximos dias.`;
+  } else if (score >= 45) {
+    return `Oportunidade média. ${businessType} com potencial moderado. Considere abordagem personalizada.`;
+  } else {
+    return `Oportunidade limitada. ${businessType} com baixo histórico. Foque em outras leads primeiro.`;
+  }
+}
+
+// Função para análise de sentimento da descrição
+export async function analyzeSentiment(text) {
+  try {
+    const prompt = `Analise o sentimento desta descrição de empresa e classifique como POSITIVO, NEUTRO ou NEGATIVO. Considere fatores como profissionalismo, confiança e atratividade para clientes.
+
+Texto: "${text}"
+
+Responda apenas com: POSITIVO/NEUTRO/NEGATIVO - breve justificativa`;
+
+    if (geminiService.model) {
+      const result = await geminiService.generateContent(prompt);
+      return {
+        sentiment: result.split(' - ')[0].trim(),
+        reason: result.split(' - ')[1]?.trim() || 'Análise realizada',
+        confidence: 80
+      };
+    }
+
+    return { sentiment: 'NEUTRO', reason: 'Análise não disponível', confidence: 0 };
+
+  } catch (error) {
+    console.error('Erro na análise de sentimento:', error);
+    return { sentiment: 'NEUTRO', reason: 'Erro na análise', confidence: 0 };
+  }
+}
+
+// Função para gerar recomendações de abordagem
+export async function generateApproachRecommendations(companyData, prediction) {
+  try {
+    const prompt = `Com base nestes dados, gere 3 recomendações específicas de abordagem para esta empresa:
+
+Empresa: ${companyData.title}
+Tipo: ${companyData.businessType}
+Bairro: ${companyData.neighborhood}
+Score de conversão: ${prediction.score}/100 (${prediction.category})
+Fatores positivos: ${prediction.factors.join(', ')}
+
+Forneça 3 recomendações práticas e específicas para abordagem comercial.`;
+
+    if (geminiService.model) {
+      const recommendations = await geminiService.generateContent(prompt);
+      return {
+        recommendations: recommendations.split('\n').filter(r => r.trim().length > 0),
+        generated: true
+      };
+    }
+
+    return {
+      recommendations: [
+        'Entre em contato por telefone durante horário comercial',
+        'Envie proposta personalizada por email',
+        'Agende visita presencial para apresentação'
+      ],
+      generated: false
+    };
+
+  } catch (error) {
+    console.error('Erro gerando recomendações:', error);
+    return {
+      recommendations: ['Abordagem padrão recomendada'],
+      generated: false
+    };
+  }
 }
 
 // Função para gerar relatório de prospecção

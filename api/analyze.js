@@ -10,10 +10,14 @@ export default async function handler(req, res) {
     const { action, companyId, limit = 10 } = req.body;
 
     if (action === 'analyze_company' && companyId) {
+      // Record analytics
+      await storage.recordUserAction('ai_analysis_requested', { companyId });
+
       // Verificar cache primeiro
       const cachedAnalysis = await storage.getCachedCompanyAnalysis(companyId);
       if (cachedAnalysis) {
         console.log(`⚡ Análise em cache encontrada para empresa: ${companyId}`);
+        await storage.recordUserAction('ai_analysis_cache_hit', { companyId });
         return res.status(200).json({
           success: true,
           analysis: cachedAnalysis,
@@ -28,8 +32,20 @@ export default async function handler(req, res) {
         return res.status(404).json({ error: 'Empresa não encontrada' });
       }
 
+      // Record analysis start
+      const analysisStartTime = Date.now();
+
       // Analisar empresa com IA
       const analysis = await analyzeCompany(company);
+
+      // Record performance
+      const analysisDuration = Date.now() - analysisStartTime;
+      await storage.updatePerformanceMetric('ai_analysis_duration', analysisDuration);
+      await storage.recordUserAction('ai_analysis_completed', {
+        companyId,
+        duration: analysisDuration,
+        provider: analysis.provider
+      });
 
       // Salvar análise no cache
       await storage.setCachedCompanyAnalysis(companyId, analysis);
@@ -70,6 +86,7 @@ export default async function handler(req, res) {
       const cachedAnalysis = await storage.getCachedCompanyAnalysis(`${companyId}_deep`);
       if (cachedAnalysis) {
         console.log(`⚡ Análise profunda em cache encontrada para empresa: ${companyId}`);
+        await storage.recordUserAction('deep_analysis_cache_hit', { companyId });
         return res.status(200).json({
           success: true,
           analysis: cachedAnalysis,
@@ -84,30 +101,74 @@ export default async function handler(req, res) {
         return res.status(404).json({ error: 'Empresa não encontrada' });
       }
 
+      // Record analytics
+      await storage.recordUserAction('deep_analysis_requested', { companyId });
+      const analysisStartTime = Date.now();
+
       // Análise profunda com IA
       const analysis = await analyzeCompanyDeep(company);
 
+      // Análise de sentimento
+      const sentiment = await analyzeSentiment(company.description || company.title);
+
+      // Recomendações de abordagem
+      const prediction = await generateConversionPrediction(company);
+      const approachRecs = await generateApproachRecommendations(company, prediction);
+
+      // Combinar análises
+      const enhancedAnalysis = {
+        ...analysis,
+        sentiment,
+        prediction,
+        approachRecommendations: approachRecs,
+        analysisDate: new Date().toISOString()
+      };
+
+      // Record performance
+      const analysisDuration = Date.now() - analysisStartTime;
+      await storage.updatePerformanceMetric('deep_analysis_duration', analysisDuration);
+      await storage.recordUserAction('deep_analysis_completed', {
+        companyId,
+        duration: analysisDuration,
+        predictionScore: prediction.score
+      });
+
       // Salvar análise no cache
-      await storage.setCachedCompanyAnalysis(`${companyId}_deep`, analysis);
+      await storage.setCachedCompanyAnalysis(`${companyId}_deep`, enhancedAnalysis);
 
       // Salvar análise profunda na empresa
-      company.deepAnalysis = analysis;
+      company.deepAnalysis = enhancedAnalysis;
       await storage.saveCompany(companyId, company);
 
       return res.status(200).json({
         success: true,
-        analysis: analysis
+        analysis: enhancedAnalysis
       });
     }
 
     if (action === 'generate_smart_terms') {
       const maxTerms = req.body.maxTerms || 30;
+
+      // Record analytics
+      await storage.recordUserAction('smart_terms_requested', { maxTerms });
+
+      const startTime = Date.now();
       const searchTerms = await generateSmartSearchTerms(maxTerms);
+      const duration = Date.now() - startTime;
+
+      // Record performance
+      await storage.updatePerformanceMetric('smart_terms_generation_duration', duration);
+      await storage.recordUserAction('smart_terms_generated', {
+        maxTerms,
+        generatedTerms: searchTerms.length,
+        duration
+      });
 
       return res.status(200).json({
         success: true,
         searchTerms: searchTerms,
-        totalTerms: searchTerms.length
+        totalTerms: searchTerms.length,
+        generationTime: duration
       });
     }
 
