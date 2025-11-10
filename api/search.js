@@ -28,6 +28,8 @@ export default async function handler(req, res) {
 
     console.log(`🔍 Buscando: ${searchTerm}`);
 
+    let results = [];
+
     // Usar Playwright com Chromium otimizado para Vercel
     let browser;
     try {
