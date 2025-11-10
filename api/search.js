@@ -158,8 +158,8 @@ export default async function handler(req, res) {
       }
 
       // Aguardar carregamento dos resultados com verificação de seletor
-      await page.waitForSelector('div.g, div[data-ved], div.yuRUbf', { timeout: 10000 });
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await page.waitForSelector('div.g, div[data-ved], div.yuRUbf', { timeout: 15000 });
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
       console.log('📄 Página carregada, extraindo resultados...');
 
@@ -237,11 +237,33 @@ export default async function handler(req, res) {
         return extractedResults;
       });
 
-      // Usar IA para validar se os links são realmente de empresas
+      // Usar IA para validar se os links são realmente de empresas (apenas individuais, não listas/diretórios)
       const validatedResults = [];
       for (const result of results) {
         try {
           console.log(`🤖 Validando empresa: ${result.title}`);
+
+          // Primeiro filtro rápido baseado na URL e título
+          const urlLower = result.url.toLowerCase();
+          const titleLower = result.title.toLowerCase();
+
+          // Rejeitar imediatamente listas, diretórios, notícias, etc.
+          const rejectPatterns = [
+            /lista.*empresa/i, /diretório/i, /notícia/i, /news/i,
+            /facebook\.com/i, /instagram\.com/i, /youtube\.com/i,
+            /mercadolivre/i, /olx/i, /wikipedia/i, /google/i,
+            /translate\.google/i, /maps\.google/i, /books\.google/i,
+            /news\.google/i, /linkedin/i, /twitter/i, /tiktok/i
+          ];
+
+          const shouldReject = rejectPatterns.some(pattern =>
+            pattern.test(urlLower) || pattern.test(titleLower) || pattern.test(result.description)
+          );
+
+          if (shouldReject) {
+            console.log(`❌ ${result.title} - Rejeitado: lista/diretório/notícia/redes sociais`);
+            continue;
+          }
 
           // Criar um novo browser para validação (mais seguro)
           const validationBrowser = await puppeteer.launch(launchOptions);
@@ -266,98 +288,83 @@ export default async function handler(req, res) {
           const analysis = await validationPage.evaluate(() => {
             const bodyText = document.body?.textContent?.toLowerCase() || '';
             const url = window.location.href.toLowerCase();
+            const title = document.title?.toLowerCase() || '';
+
+            // Verificar se é uma página de empresa individual (não lista/diretório)
+            const isListPage = bodyText.includes('lista de') ||
+                              bodyText.includes('diretório') ||
+                              bodyText.includes('empresas em') ||
+                              bodyText.includes('encontre') ||
+                              bodyText.includes('buscar') ||
+                              /resultado.*busca/i.test(bodyText) ||
+                              document.querySelectorAll('a[href*="empresa"], a[href*="business"]').length > 10;
+
+            if (isListPage) {
+              return { isCompany: false, reason: 'Página de lista/diretório' };
+            }
 
             const positive = {
               contact: !!(document.querySelector('a[href*="tel:"], a[href*="mailto:"]') ||
-                         bodyText.includes('contato') || bodyText.includes('telefone')),
-              services: !!(bodyText.includes('serviço') || bodyText.includes('produto')),
-              location: !!(bodyText.includes('endereço') || document.querySelector('iframe[src*="maps"]')),
+                         bodyText.includes('contato') || bodyText.includes('telefone') ||
+                         bodyText.includes('fale conosco')),
+              services: !!(bodyText.includes('serviço') || bodyText.includes('produto') ||
+                          bodyText.includes('oferecemos') || bodyText.includes('trabalhamos')),
+              location: !!(bodyText.includes('endereço') || bodyText.includes('localização') ||
+                          document.querySelector('iframe[src*="maps"]')),
               whatsapp: !!document.querySelector('a[href*="wa.me"], a[href*="whatsapp"]'),
-              pricing: !!(bodyText.includes('preço') || bodyText.includes('orçamento'))
+              pricing: !!(bodyText.includes('preço') || bodyText.includes('orçamento') ||
+                         bodyText.includes('cotação')),
+              businessHours: !!(bodyText.includes('horário') || bodyText.includes('funcionamento')),
+              about: !!(bodyText.includes('sobre nós') || bodyText.includes('empresa') ||
+                       bodyText.includes('história'))
             };
 
             const negative = {
-              news: !!(bodyText.includes('notícia') || url.includes('/noticia/')),
+              news: !!(bodyText.includes('notícia') || url.includes('/noticia/') ||
+                      title.includes('notícia')),
               directory: !!(bodyText.includes('diretório') || bodyText.includes('lista de empresas')),
               social: !!(url.includes('facebook.com') || url.includes('instagram.com')),
-              marketplace: !!(url.includes('mercadolivre') || url.includes('olx.com'))
+              marketplace: !!(url.includes('mercadolivre') || url.includes('olx.com')),
+              search: !!(bodyText.includes('resultados da busca') || bodyText.includes('não encontrou'))
             };
 
-            const score = Object.values(positive).filter(Boolean).length -
-                          (Object.values(negative).filter(Boolean).length * 2);
+            const positiveScore = Object.values(positive).filter(Boolean).length;
+            const negativeScore = Object.values(negative).filter(Boolean).length;
+            const score = positiveScore - (negativeScore * 2);
 
-            return { positive, negative, score, bodyPreview: bodyText.substring(0, 1000) };
+            return {
+              isCompany: score >= 2 && !Object.values(negative).some(Boolean),
+              score,
+              positiveScore,
+              negativeScore,
+              positive,
+              negative,
+              bodyPreview: bodyText.substring(0, 1000)
+            };
           });
 
           await validationBrowser.close();
 
-          // Decidir se é empresa baseado no score
-          if (analysis.negative.news || analysis.negative.directory ||
-              analysis.negative.social || analysis.negative.marketplace) {
-            console.log(`❌ ${result.title} - Descartado: não é empresa comercial`);
+          // Decidir se é empresa baseado na análise
+          if (!analysis.isCompany) {
+            console.log(`❌ ${result.title} - Descartado: ${analysis.reason || `score ${analysis.score} (positivo: ${analysis.positiveScore}, negativo: ${analysis.negativeScore})`}`);
             continue;
           }
 
-          if (analysis.score >= 3) {
-            console.log(`✅ ${result.title} - Empresa confirmada (score: ${analysis.score})`);
-            validatedResults.push(result);
-          } else if (analysis.score >= 1) {
-            // Casos intermediários: consultar IA
-            console.log(`🤔 ${result.title} - Caso intermediário (score: ${analysis.score}), consultando IA...`);
-
-            try {
-              const prompt = `Analise se este é um site de empresa comercial real:
-
-URL: ${result.url}
-TÍTULO: ${result.title}
-DESCRIÇÃO: ${result.description}
-CONTEÚDO: ${analysis.bodyPreview}
-
-Responda apenas SIM ou NÃO.`;
-
-              const aiResponse = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=' + (process.env.GEMINI_KEYS?.split(',')[0] || ''), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  contents: [{ parts: [{ text: prompt }] }],
-                  generationConfig: { temperature: 0.1, maxOutputTokens: 50 }
-                })
-              });
-
-              if (aiResponse.ok) {
-                const aiResult = await aiResponse.json();
-                const text = aiResult?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-                const isCompany = /^\s*SIM\b/i.test(text || '');
-
-                if (isCompany) {
-                  console.log(`✅ ${result.title} - IA confirmou como empresa`);
-                  validatedResults.push(result);
-                } else {
-                  console.log(`❌ ${result.title} - IA descartou`);
-                }
-              } else {
-                console.log(`⚠️ ${result.title} - Erro na consulta IA, mantendo por score ${analysis.score}`);
-                validatedResults.push(result);
-              }
-            } catch (aiError) {
-              console.log(`⚠️ ${result.title} - Erro IA (${aiError.message}), mantendo por score ${analysis.score}`);
-              validatedResults.push(result);
-            }
-          } else {
-            console.log(`❌ ${result.title} - Score muito baixo (${analysis.score})`);
-          }
+          console.log(`✅ ${result.title} - Empresa confirmada (score: ${analysis.score})`);
+          validatedResults.push(result);
 
           // Pequena pausa entre validações
           await new Promise(resolve => setTimeout(resolve, 1000));
 
         } catch (validationError) {
           console.error(`❌ Erro na validação de ${result.title}:`, validationError.message);
-          // Em caso de erro, manter o resultado (pode ser empresa válida)
-          validatedResults.push(result);
+          // Em caso de erro de carregamento, não incluir (pode ser página problemática)
+          continue;
         }
       }
 
-      console.log(`🎯 Após validação: ${validatedResults.length} empresas confirmadas de ${results.length} links`);
+      console.log(`🎯 Após validação rigorosa: ${validatedResults.length} empresas individuais confirmadas de ${results.length} links iniciais`);
       results = validatedResults;
 
       console.log(`📊 Extraídos ${results.length} resultados válidos`);
