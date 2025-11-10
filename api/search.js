@@ -214,22 +214,97 @@ export default async function handler(req, res) {
         domain: '.google.com'
       });
 
-      // Buscar no Google
-      const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchTerm)}&num=10&hl=pt-BR`;
-      console.log(`🌐 Acessando: ${searchUrl}`);
+      // Estratégia: buscar nas páginas 2-5 do Google para encontrar empresas que precisam de serviços
+      let allResults = [];
 
-      const response = await page.goto(searchUrl, {
-        waitUntil: 'domcontentloaded',
-        timeout: 30000
-      });
+      for (let pageNum = 2; pageNum <= 5; pageNum++) {
+        try {
+          const startParam = (pageNum - 1) * 10; // Google usa start=10,20,30,40...
+          const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchTerm)}&num=10&start=${startParam}&hl=pt-BR`;
+          console.log(`🌐 Página ${pageNum}: ${searchUrl}`);
 
-      if (!response.ok()) {
-        throw new Error(`HTTP ${response.status()}: ${response.statusText()}`);
+          const response = await page.goto(searchUrl, {
+            waitUntil: 'domcontentloaded',
+            timeout: 30000
+          });
+
+          if (!response.ok()) {
+            console.warn(`Página ${pageNum} falhou: HTTP ${response.status()}`);
+            continue;
+          }
+
+          // Aguardar carregamento dos resultados
+          await page.waitForSelector('div.g, div[data-ved], div.yuRUbf', { timeout: 10000 });
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Reduzido para múltiplas páginas
+
+          // Extrair resultados desta página
+          const pageResults = await page.evaluate(() => {
+            const extractedResults = [];
+            const allLinks = Array.from(document.querySelectorAll('a[href]')).filter(a => {
+              const href = a.href;
+              return href &&
+                     href.startsWith('http') &&
+                     !href.includes('google.com') &&
+                     !href.includes('youtube.com') &&
+                     !href.includes('wikipedia.org') &&
+                     !href.includes('facebook.com') &&
+                     !href.includes('instagram.com') &&
+                     !href.includes('linkedin.com') &&
+                     !href.includes('googleusercontent.com') &&
+                     !href.includes('translate.google.com') &&
+                     !href.includes('maps.google.com');
+            });
+
+            for (let i = 0; i < Math.min(allLinks.length, 8); i++) { // 8 por página para total ~32
+              const link = allLinks[i];
+              const title = link.textContent?.trim() || link.querySelector('h3')?.textContent?.trim() || '';
+
+              let finalTitle = title;
+              if (!finalTitle) {
+                const parent = link.closest('div.g') || link.closest('div[data-ved]');
+                if (parent) {
+                  const h3 = parent.querySelector('h3');
+                  if (h3) finalTitle = h3.textContent?.trim();
+                }
+              }
+
+              if (finalTitle && finalTitle.length > 2) { // Mais permissivo para páginas profundas
+                const parent = link.closest('div.g') || link.closest('div[data-ved]');
+                let description = '';
+                if (parent) {
+                  const snippet = parent.querySelector('span[data-ved]') || parent.querySelector('.VwiC3b') || parent.querySelector('span');
+                  if (snippet) {
+                    description = snippet.textContent?.trim() || '';
+                  }
+                }
+
+                extractedResults.push({
+                  title: finalTitle.substring(0, 100),
+                  url: link.href,
+                  description: description.substring(0, 200),
+                  position: extractedResults.length + 1,
+                  googlePage: pageNum
+                });
+              }
+            }
+
+            return extractedResults;
+          });
+
+          allResults = allResults.concat(pageResults);
+          console.log(`📄 Página ${pageNum}: ${pageResults.length} resultados`);
+
+          // Pequena pausa entre páginas para evitar detecção
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+        } catch (pageError) {
+          console.warn(`Erro na página ${pageNum}:`, pageError.message);
+          continue;
+        }
       }
 
-      // Aguardar carregamento dos resultados com verificação de seletor
-      await page.waitForSelector('div.g, div[data-ved], div.yuRUbf', { timeout: 15000 });
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      console.log(`📊 Total extraído de todas as páginas: ${allResults.length} resultados`);
+      results = allResults;
 
       console.log('📄 Página carregada, extraindo resultados...');
 
@@ -384,13 +459,14 @@ export default async function handler(req, res) {
       console.log('❌ Nenhum resultado encontrado - Google pode estar bloqueando');
     }
 
-    // Filtrar e validar resultados
+    // Filtrar e validar resultados (mais permissivo para páginas profundas)
     const validResults = results.filter(r =>
       r.url &&
       !r.url.includes('google.com') &&
       !r.url.includes('youtube.com') &&
       !r.url.includes('facebook.com') &&
-      (r.description.length > 10 || r.title.length > 5)
+      !r.url.includes('wikipedia.org') &&
+      (r.description.length > 5 || r.title.length > 3) // Mais permissivo
     );
 
     // Salvar no JSON storage e atualizar aprendizado
