@@ -169,68 +169,70 @@ export default async function handler(req, res) {
         // Função auxiliar para limpar texto
         const cleanText = (text) => text?.trim().replace(/\s+/g, ' ') || '';
 
-        // Selecionar todos os resultados de busca
-        const resultElements = document.querySelectorAll('div.g, div[data-ved], div.yuRUbf');
+        // Estratégia mais robusta para extrair resultados do Google
+        const allLinks = Array.from(document.querySelectorAll('a[href]')).filter(a => {
+          const href = a.href;
+          return href &&
+                 href.startsWith('http') &&
+                 !href.includes('google.com') &&
+                 !href.includes('youtube.com') &&
+                 !href.includes('wikipedia.org') &&
+                 !href.includes('facebook.com') &&
+                 !href.includes('instagram.com') &&
+                 !href.includes('linkedin.com') &&
+                 !href.includes('googleusercontent.com') &&
+                 !href.includes('translate.google.com') &&
+                 !href.includes('maps.google.com') &&
+                 !href.includes('books.google.com') &&
+                 !href.includes('news.google.com');
+        });
 
-        for (let i = 0; i < Math.min(resultElements.length, 8); i++) {
-          const element = resultElements[i];
+        console.log(`🔍 Encontrados ${allLinks.length} links válidos na página...`);
 
-          // Extrair link
-          const linkElement = element.querySelector('a[href]');
-          if (!linkElement) continue;
+        for (let i = 0; i < Math.min(allLinks.length, 8); i++) {
+          const link = allLinks[i];
+          const title = link.textContent?.trim() || link.querySelector('h3')?.textContent?.trim() || '';
 
-          const url = linkElement.href;
-          if (!url || !url.startsWith('http') ||
-              url.includes('google.com') ||
-              url.includes('youtube.com') ||
-              url.includes('facebook.com') ||
-              url.includes('instagram.com') ||
-              url.includes('wikipedia.org') ||
-              url.includes('linkedin.com')) {
-            continue;
-          }
-
-          // Extrair título
-          let title = '';
-          const titleSelectors = ['h3', '.LC20lb', '.DKV0Md'];
-          for (const selector of titleSelectors) {
-            const titleEl = element.querySelector(selector);
-            if (titleEl) {
-              title = cleanText(titleEl.textContent);
-              if (title) break;
+          // Tentar encontrar o título no elemento pai se não estiver no link
+          let finalTitle = title;
+          if (!finalTitle) {
+            const parent = link.closest('div.g') || link.closest('div[data-ved]');
+            if (parent) {
+              const h3 = parent.querySelector('h3');
+              if (h3) finalTitle = h3.textContent?.trim();
             }
           }
 
-          // Se não encontrou título específico, usar o texto do link
-          if (!title) {
-            title = cleanText(linkElement.textContent);
-          }
+          if (finalTitle && finalTitle.length > 3) { // Título deve ter pelo menos 4 caracteres
+            console.log(`Resultado ${i + 1}:`);
+            console.log(`  Título: ${finalTitle.substring(0, 50)}`);
+            console.log(`  URL: ${link.href.substring(0, 50)}`);
 
-          // Extrair descrição
-          let description = '';
-          const descSelectors = ['.VwiC3b', '.aCOpRe', 'span[data-ved]', '.IsZvec'];
-          for (const selector of descSelectors) {
-            const descEl = element.querySelector(selector);
-            if (descEl) {
-              description = cleanText(descEl.textContent);
-              if (description) break;
+            // Extrair descrição do snippet do Google
+            let description = '';
+            const parent = link.closest('div.g') || link.closest('div[data-ved]');
+            if (parent) {
+              const snippet = parent.querySelector('span[data-ved]') || parent.querySelector('.VwiC3b') || parent.querySelector('span');
+              if (snippet) {
+                description = snippet.textContent?.trim() || '';
+              }
             }
-          }
 
-          // Validar resultado
-          if (title && title.length > 3 && url) {
             extractedResults.push({
-              title: title.substring(0, 100),
-              url: url,
+              title: finalTitle.substring(0, 100),
+              url: link.href,
               description: description.substring(0, 200),
               position: extractedResults.length + 1
             });
-          }
+            console.log(`  ✅ Adicionado à lista`);
 
-          // Limitar a 6 resultados
-          if (extractedResults.length >= 6) break;
+            if (extractedResults.length >= 6) break;
+          } else {
+            console.log(`Resultado ${i + 1} rejeitado: título muito curto ou vazio`);
+          }
         }
 
+        console.log(`📊 Total de resultados válidos extraídos: ${extractedResults.length}`);
         return extractedResults;
       });
 
