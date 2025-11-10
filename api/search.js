@@ -158,7 +158,7 @@ export default async function handler(req, res) {
 
       // Aguardar carregamento dos resultados com verificação de seletor
       await page.waitForSelector('div.g, div[data-ved], div.yuRUbf', { timeout: 10000 });
-      await page.waitForTimeout(2000);
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
       console.log('📄 Página carregada, extraindo resultados...');
 
