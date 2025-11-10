@@ -402,10 +402,19 @@
                     }
 
                     if (data.resultsFound > 0) {
-                        addResults(data.results);
-                        addStatusMessage(`${data.resultsFound} empresas adicionadas à lista`);
+                        // Filter only AI-approved results for display
+                        const approvedResults = data.results.filter(result =>
+                            result.aiValidation && result.aiValidation.isValid === true
+                        );
 
-                        // Update local cache after successful search
+                        if (approvedResults.length > 0) {
+                            addResults(approvedResults);
+                            addStatusMessage(`${approvedResults.length} empresas aprovadas adicionadas à lista`);
+                        } else {
+                            addStatusMessage(`${data.resultsFound} resultados encontrados, mas nenhum aprovado pela IA`);
+                        }
+
+                        // Update local cache after successful search (with all results)
                         updateLocalCache();
                     }
 
@@ -726,14 +735,17 @@
             elements.startBtn.title = '';
         }
 
-        // Enhanced loadResults with offline support
+        // Enhanced loadResults with offline support and AI filtering
         const originalLoadResults = loadResults;
         loadResults = async function(append = false, applyCurrentFilters = false) {
             if (!isOnline && offlineData) {
-                // Use offline data
+                // Use offline data - filter only AI-approved companies
                 console.log('Usando dados offline');
 
-                let filteredResults = offlineData.results || [];
+                let allResults = offlineData.results || [];
+                let filteredResults = allResults.filter(company =>
+                    company.aiValidation && company.aiValidation.isValid === true
+                );
 
                 // Apply current filters to offline data
                 if (applyCurrentFilters) {
@@ -767,7 +779,7 @@
                 if (paginatedResults.length > 0) {
                     addResults(paginatedResults, append);
                 } else if (!append) {
-                    elements.resultsContainer.innerHTML = '<p class="text-gray-500 text-center py-8">Nenhum resultado encontrado (modo offline)</p>';
+                    elements.resultsContainer.innerHTML = '<p class="text-gray-500 text-center py-8">Nenhum resultado aprovado encontrado (modo offline)</p>';
                 }
 
                 elements.resultsTotal.textContent = filteredResults.length;
@@ -810,17 +822,27 @@
                 if (cachedData) {
                     const localData = JSON.parse(cachedData);
                     if (localData.results && localData.results.length > 0) {
-                        console.log('Carregando dados do cache local...');
-                        addResults(localData.results, false);
-                        elements.resultsTotal.textContent = localData.total || localData.results.length;
-                        elements.resultsShown.textContent = localData.results.length;
+                        // Filter only AI-approved companies
+                        const approvedCompanies = localData.results.filter(company =>
+                            company.aiValidation && company.aiValidation.isValid === true
+                        );
 
-                        // Load searches if available
-                        if (localData.previousSearches) {
-                            loadPreviousSearches(localData.previousSearches);
+                        if (approvedCompanies.length > 0) {
+                            console.log(`Carregando ${approvedCompanies.length} empresas aprovadas do cache local...`);
+                            addResults(approvedCompanies, false);
+                            elements.resultsTotal.textContent = approvedCompanies.length;
+                            elements.resultsShown.textContent = approvedCompanies.length;
+
+                            // Load searches if available
+                            if (localData.previousSearches) {
+                                loadPreviousSearches(localData.previousSearches);
+                            }
+
+                            showDataStatus(`${approvedCompanies.length} empresas aprovadas carregadas`, 'success');
+                        } else {
+                            console.log('Nenhuma empresa aprovada encontrada no cache local');
+                            showDataStatus('Nenhuma empresa aprovada no cache', 'warning');
                         }
-
-                        showDataStatus('Dados locais carregados', 'success');
                     }
                 }
 
@@ -833,25 +855,36 @@
                     if (response.ok) {
                         const serverData = await response.json();
                         if (serverData.success && serverData.results.length > 0) {
-                            // Show all results
-                            addResults(serverData.results, false);
-                            elements.resultsTotal.textContent = serverData.total;
-                            elements.resultsShown.textContent = serverData.results.length;
+                            // Filter only AI-approved companies
+                            const approvedCompanies = serverData.results.filter(company =>
+                                company.aiValidation && company.aiValidation.isValid === true
+                            );
 
-                            // Load searches
-                            if (serverData.previousSearches) {
-                                loadPreviousSearches(serverData.previousSearches);
+                            if (approvedCompanies.length > 0) {
+                                // Show only approved results
+                                addResults(approvedCompanies, false);
+                                elements.resultsTotal.textContent = approvedCompanies.length;
+                                elements.resultsShown.textContent = approvedCompanies.length;
+
+                                // Load searches
+                                if (serverData.previousSearches) {
+                                    loadPreviousSearches(serverData.previousSearches);
+                                }
+
+                                // Update local cache with ALL server data (but display only approved)
+                                localStorage.setItem('prospectDashboardData', JSON.stringify({
+                                    results: serverData.results, // Store all for future filtering
+                                    total: serverData.total,
+                                    previousSearches: serverData.previousSearches,
+                                    lastSync: Date.now()
+                                }));
+
+                                console.log(`Carregadas ${approvedCompanies.length} empresas aprovadas do servidor (${serverData.results.length} total)`);
+                                showDataStatus(`${approvedCompanies.length} empresas aprovadas sincronizadas`, 'success');
+                            } else {
+                                console.log('Nenhuma empresa aprovada encontrada no servidor');
+                                showDataStatus('Nenhuma empresa aprovada no servidor', 'warning');
                             }
-
-                            // Update local cache with ALL server data
-                            localStorage.setItem('prospectDashboardData', JSON.stringify({
-                                results: serverData.results,
-                                total: serverData.total,
-                                previousSearches: serverData.previousSearches,
-                                lastSync: Date.now()
-                            }));
-                            console.log(`Carregadas ${serverData.results.length} empresas do servidor`);
-                            showDataStatus('Sincronizado com servidor', 'success');
                         } else {
                             // If no server data, try local cache
                             console.log('Nenhum dado no servidor, tentando cache local...');
@@ -1003,6 +1036,20 @@
                                 lastSync: Date.now()
                             }));
                             console.log('Cache local atualizado após busca');
+
+                            // Update display with only approved companies
+                            const approvedCompanies = data.results.filter(company =>
+                                company.aiValidation && company.aiValidation.isValid === true
+                            );
+
+                            if (approvedCompanies.length > 0) {
+                                // Clear current results and show updated approved ones
+                                elements.resultsContainer.innerHTML = '';
+                                addResults(approvedCompanies, false);
+                                elements.resultsTotal.textContent = approvedCompanies.length;
+                                elements.resultsShown.textContent = approvedCompanies.length;
+                                showDataStatus(`${approvedCompanies.length} empresas aprovadas atualizadas`, 'success');
+                            }
                         }
                     })
                     .catch(error => console.error('Erro ao atualizar cache:', error));
@@ -1039,6 +1086,20 @@
                                     lastSync: Date.now()
                                 }));
                                 console.log('Dados sincronizados com servidor');
+
+                                // Update display with only approved companies
+                                const approvedCompanies = serverData.results.filter(company =>
+                                    company.aiValidation && company.aiValidation.isValid === true
+                                );
+
+                                if (approvedCompanies.length > 0) {
+                                    // Clear and reload with approved companies only
+                                    elements.resultsContainer.innerHTML = '';
+                                    addResults(approvedCompanies, false);
+                                    elements.resultsTotal.textContent = approvedCompanies.length;
+                                    elements.resultsShown.textContent = approvedCompanies.length;
+                                    showDataStatus(`${approvedCompanies.length} empresas aprovadas sincronizadas`, 'success');
+                                }
                             }
                         }
                     })
