@@ -11,7 +11,6 @@ const COMPANIES_FILE = path.join(DATA_DIR, 'companies.json');
 const STATS_FILE = path.join(DATA_DIR, 'stats.json');
 const LEARNING_FILE = path.join(DATA_DIR, 'learning.json');
 const CACHE_FILE = path.join(DATA_DIR, 'cache.json');
-const ANALYTICS_FILE = path.join(DATA_DIR, 'analytics.json');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -53,45 +52,14 @@ if (!fs.existsSync(CACHE_FILE)) {
     }));
 }
 
-if (!fs.existsSync(ANALYTICS_FILE)) {
-    fs.writeFileSync(ANALYTICS_FILE, JSON.stringify({
-      performanceMetrics: {},
-      userBehavior: {},
-      aiPredictions: {},
-      conversionRates: {},
-      lastUpdate: Date.now()
-    }));
-}
 
 // Storage utility functions
 export const storage = {
-  // Companies storage with indexing
-  _companiesIndex: new Map(), // In-memory index for faster lookups
-  _companiesLastLoad: 0,
 
   async getCompanies() {
     try {
       const data = fs.readFileSync(COMPANIES_FILE, 'utf8');
-      const companies = JSON.parse(data);
-
-      // Build index if not exists or file changed
-      const stats = fs.statSync(COMPANIES_FILE);
-      if (this._companiesLastLoad < stats.mtime.getTime()) {
-        this._companiesIndex.clear();
-        Object.entries(companies).forEach(([key, company]) => {
-          this._companiesIndex.set(key, company);
-          // Index by searchTerm for faster filtering
-          if (company.searchTerm) {
-            if (!this._companiesIndex.has(`searchTerm:${company.searchTerm}`)) {
-              this._companiesIndex.set(`searchTerm:${company.searchTerm}`, []);
-            }
-            this._companiesIndex.get(`searchTerm:${company.searchTerm}`).push(key);
-          }
-        });
-        this._companiesLastLoad = stats.mtime.getTime();
-      }
-
-      return companies;
+      return JSON.parse(data);
     } catch (error) {
       console.error('Error reading companies:', error);
       return {};
@@ -103,19 +71,6 @@ export const storage = {
       const companies = await this.getCompanies();
       companies[key] = { ...data, savedAt: Date.now() };
       fs.writeFileSync(COMPANIES_FILE, JSON.stringify(companies, null, 2));
-
-      // Update index
-      this._companiesIndex.set(key, companies[key]);
-      if (data.searchTerm) {
-        if (!this._companiesIndex.has(`searchTerm:${data.searchTerm}`)) {
-          this._companiesIndex.set(`searchTerm:${data.searchTerm}`, []);
-        }
-        const termIndex = this._companiesIndex.get(`searchTerm:${data.searchTerm}`);
-        if (!termIndex.includes(key)) {
-          termIndex.push(key);
-        }
-      }
-
       return true;
     } catch (error) {
       console.error('Error saving company:', error);
@@ -143,22 +98,6 @@ export const storage = {
     }
   },
 
-  // Optimized search by term using index
-  async getCompaniesBySearchTerm(searchTerm) {
-    try {
-      await this.getCompanies(); // Ensure index is built
-      const companyKeys = this._companiesIndex.get(`searchTerm:${searchTerm}`) || [];
-      const companies = await this.getCompanies();
-      return companyKeys.map(key => companies[key]).filter(Boolean);
-    } catch (error) {
-      console.error('Error getting companies by search term:', error);
-      // Fallback to filtering all companies
-      const companies = await this.getCompanies();
-      return Object.values(companies).filter(company =>
-        company.searchTerm === searchTerm && company.foundAt
-      );
-    }
-  },
 
   // Stats storage
   async getStats() {
@@ -394,173 +333,4 @@ export const storage = {
      }
    },
 
-   // ==================== ANALYTICS SYSTEM ====================
-   async getAnalytics() {
-     try {
-       const data = fs.readFileSync(ANALYTICS_FILE, 'utf8');
-       return JSON.parse(data);
-     } catch (error) {
-       console.error('Error reading analytics:', error);
-       return {
-         performanceMetrics: {},
-         userBehavior: {},
-         aiPredictions: {},
-         conversionRates: {},
-         lastUpdate: Date.now()
-       };
-     }
-   },
-
-   async saveAnalytics(data) {
-     try {
-       fs.writeFileSync(ANALYTICS_FILE, JSON.stringify(data, null, 2));
-       return true;
-     } catch (error) {
-       console.error('Error saving analytics:', error);
-       return false;
-     }
-   },
-
-   async updatePerformanceMetric(metric, value) {
-     try {
-       const analytics = await this.getAnalytics();
-       if (!analytics.performanceMetrics[metric]) {
-         analytics.performanceMetrics[metric] = {
-           values: [],
-           avg: 0,
-           min: Infinity,
-           max: -Infinity,
-           count: 0
-         };
-       }
-
-       const metricData = analytics.performanceMetrics[metric];
-       metricData.values.push({ value, timestamp: Date.now() });
-
-       // Keep only last 1000 values
-       if (metricData.values.length > 1000) {
-         metricData.values = metricData.values.slice(-1000);
-       }
-
-       // Calculate stats
-       const values = metricData.values.map(v => v.value);
-       metricData.avg = values.reduce((a, b) => a + b, 0) / values.length;
-       metricData.min = Math.min(...values);
-       metricData.max = Math.max(...values);
-       metricData.count = values.length;
-
-       analytics.lastUpdate = Date.now();
-       await this.saveAnalytics(analytics);
-       return true;
-     } catch (error) {
-       console.error('Error updating performance metric:', error);
-       return false;
-     }
-   },
-
-   async recordUserAction(action, data = {}) {
-     try {
-       const analytics = await this.getAnalytics();
-       const actionKey = `${action}_${Date.now()}`;
-
-       analytics.userBehavior[actionKey] = {
-         action,
-         data,
-         timestamp: Date.now(),
-         sessionId: data.sessionId || 'unknown'
-       };
-
-       // Keep only last 5000 actions
-       const actions = Object.keys(analytics.userBehavior);
-       if (actions.length > 5000) {
-         const sorted = actions.sort();
-         const toDelete = sorted.slice(0, actions.length - 5000);
-         toDelete.forEach(key => delete analytics.userBehavior[key]);
-       }
-
-       analytics.lastUpdate = Date.now();
-       await this.saveAnalytics(analytics);
-       return true;
-     } catch (error) {
-       console.error('Error recording user action:', error);
-       return false;
-     }
-   },
-
-   async updateConversionRate(businessType, neighborhood, converted, total) {
-     try {
-       const analytics = await this.getAnalytics();
-       const key = `${businessType}_${neighborhood}`;
-
-       if (!analytics.conversionRates[key]) {
-         analytics.conversionRates[key] = {
-           converted: 0,
-           total: 0,
-           rate: 0,
-           lastUpdate: Date.now()
-         };
-       }
-
-       const rateData = analytics.conversionRates[key];
-       rateData.converted += converted;
-       rateData.total += total;
-       rateData.rate = (rateData.converted / rateData.total) * 100;
-       rateData.lastUpdate = Date.now();
-
-       analytics.lastUpdate = Date.now();
-       await this.saveAnalytics(analytics);
-       return true;
-     } catch (error) {
-       console.error('Error updating conversion rate:', error);
-       return false;
-     }
-   },
-
-   async getAnalyticsSummary() {
-     try {
-       const analytics = await this.getAnalytics();
-       const summary = {
-         performance: {},
-         userActivity: {},
-         conversionRates: {},
-         predictions: {},
-         lastUpdate: analytics.lastUpdate
-       };
-
-       // Performance summary
-       Object.entries(analytics.performanceMetrics).forEach(([metric, data]) => {
-         summary.performance[metric] = {
-           avg: Math.round(data.avg * 100) / 100,
-           min: Math.round(data.min * 100) / 100,
-           max: Math.round(data.max * 100) / 100,
-           count: data.count
-         };
-       });
-
-       // User activity summary (last 24h)
-       const last24h = Date.now() - (24 * 60 * 60 * 1000);
-       const recentActions = Object.values(analytics.userBehavior).filter(
-         action => action.timestamp > last24h
-       );
-       summary.userActivity = {
-         totalActions: recentActions.length,
-         uniqueSessions: new Set(recentActions.map(a => a.sessionId)).size,
-         topActions: {}
-       };
-
-       // Count actions
-       recentActions.forEach(action => {
-         summary.userActivity.topActions[action.action] =
-           (summary.userActivity.topActions[action.action] || 0) + 1;
-       });
-
-       // Conversion rates summary
-       summary.conversionRates = analytics.conversionRates;
-
-       return summary;
-     } catch (error) {
-       console.error('Error getting analytics summary:', error);
-       return {};
-     }
-   }
 };
