@@ -253,7 +253,8 @@ export default async function handler(req, res) {
             /facebook\.com/i, /instagram\.com/i, /youtube\.com/i,
             /mercadolivre/i, /olx/i, /wikipedia/i, /google/i,
             /translate\.google/i, /maps\.google/i, /books\.google/i,
-            /news\.google/i, /linkedin/i, /twitter/i, /tiktok/i
+            /news\.google/i, /linkedin/i, /twitter/i, /tiktok/i,
+            /tripadvisor/i, /yelp/i, /ifood/i, /uber eats/i
           ];
 
           const shouldReject = rejectPatterns.some(pattern =>
@@ -266,6 +267,10 @@ export default async function handler(req, res) {
           }
 
           // Criar um novo browser para validação (mais seguro)
+          const puppeteer = isVercel ?
+            await import("puppeteer-core") :
+            await import("puppeteer");
+
           const validationBrowser = await puppeteer.launch(launchOptions);
           const validationPage = await validationBrowser.newPage();
 

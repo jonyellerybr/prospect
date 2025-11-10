@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { Mistral } from '@mistralai/mistralai';
 import dotenv from 'dotenv';
+import { storage } from './storage.js';
 
 dotenv.config();
 
