@@ -6,7 +6,6 @@
     <title>Prospecção Inteligente - Fortaleza</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body class="bg-gradient-to-br from-purple-600 via-blue-600 to-indigo-700 min-h-screen">
     <!-- Header -->
@@ -130,7 +129,7 @@
             </h2>
 
             <!-- Performance Metrics -->
-            <div class="grid md:grid-cols-4 gap-4 mb-6">
+            <div class="grid md:grid-cols-3 gap-4 mb-6">
                 <div class="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-4">
                     <h3 class="font-semibold text-blue-800 mb-2">Tempo Médio Busca</h3>
                     <p id="avg-search-time" class="text-2xl font-bold text-blue-600">--</p>
@@ -146,25 +145,24 @@
                     <p id="cache-hit-rate" class="text-2xl font-bold text-orange-600">--%</p>
                     <p class="text-sm text-orange-600">eficiência do cache</p>
                 </div>
-                <div class="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg p-4">
-                    <h3 class="font-semibold text-purple-800 mb-2">Conversão Média</h3>
-                    <p id="avg-conversion-rate" class="text-2xl font-bold text-purple-600">--%</p>
-                    <p class="text-sm text-purple-600">taxa de conversão</p>
-                </div>
             </div>
 
-            <!-- Charts Container -->
-            <div class="grid md:grid-cols-2 gap-6 mb-6">
-                <!-- Performance Chart -->
-                <div class="bg-gray-50 rounded-lg p-4">
-                    <h3 class="font-semibold text-gray-800 mb-3">Performance por Hora</h3>
-                    <canvas id="performance-chart" width="300" height="200"></canvas>
+            <!-- Performance Metrics -->
+            <div class="grid md:grid-cols-3 gap-4 mb-6">
+                <div class="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-4">
+                    <h3 class="font-semibold text-blue-800 mb-2">Tempo Médio Busca</h3>
+                    <p id="avg-search-time" class="text-2xl font-bold text-blue-600">--</p>
+                    <p class="text-sm text-blue-600">segundos por busca</p>
                 </div>
-
-                <!-- Conversion Funnel -->
-                <div class="bg-gray-50 rounded-lg p-4">
-                    <h3 class="font-semibold text-gray-800 mb-3">Funil de Conversão</h3>
-                    <canvas id="conversion-chart" width="300" height="200"></canvas>
+                <div class="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-4">
+                    <h3 class="font-semibold text-green-800 mb-2">Análises IA</h3>
+                    <p id="ai-analyses-count" class="text-2xl font-bold text-green-600">--</p>
+                    <p class="text-sm text-green-600">análises realizadas</p>
+                </div>
+                <div class="bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg p-4">
+                    <h3 class="font-semibold text-orange-800 mb-2">Cache Hit Rate</h3>
+                    <p id="cache-hit-rate" class="text-2xl font-bold text-orange-600">--%</p>
+                    <p class="text-sm text-orange-600">eficiência do cache</p>
                 </div>
             </div>
 
@@ -303,6 +301,12 @@
                 Mostrando <span id="results-shown">0</span> de <span id="results-total">0</span> empresas encontradas
             </div>
         </div>
+
+        <!-- Analytics Footer -->
+        <div class="mt-6 text-center text-xs text-gray-500">
+            <p>💡 Sistema de Prospecção Inteligente com IA | Cache ativo | Analytics em tempo real</p>
+        </div>
+        </div>
     </div>
 
     <script>
@@ -324,9 +328,6 @@
         // Offline support
         let isOnline = navigator.onLine;
         let offlineData = null;
-
-        // Load saved filters and settings
-        loadSavedSettings();
 
         const elements = {
             startBtn: document.getElementById('start-btn'),
@@ -359,6 +360,9 @@
             clearFilters: document.getElementById('clear-filters'),
             dataStatus: document.getElementById('data-status')
         };
+
+        // Load saved filters and settings
+        loadSavedSettings();
 
         // Start prospecting
         elements.startBtn.addEventListener('click', startProspecting);
@@ -1126,7 +1130,6 @@
             const searchTimeEl = document.getElementById('avg-search-time');
             const aiAnalysesEl = document.getElementById('ai-analyses-count');
             const cacheHitEl = document.getElementById('cache-hit-rate');
-            const conversionEl = document.getElementById('avg-conversion-rate');
 
             if (analytics.performance) {
                 if (analytics.performance.search_duration) {
@@ -1147,98 +1150,10 @@
                 cacheHitEl.textContent = hitRate + '%';
             }
 
-            // Conversion rates
-            if (analytics.conversionRates && Object.keys(analytics.conversionRates).length > 0) {
-                const rates = Object.values(analytics.conversionRates);
-                const avgRate = rates.reduce((sum, rate) => sum + rate.rate, 0) / rates.length;
-                conversionEl.textContent = avgRate.toFixed(1) + '%';
-            }
-
-            // Update charts
-            updatePerformanceChart(analytics);
-            updateConversionChart(analytics);
+            // Update heatmap
             updateNeighborhoodHeatmap(analytics);
         }
 
-        function updatePerformanceChart(analytics) {
-            const ctx = document.getElementById('performance-chart');
-            if (!ctx) return;
-
-            const performanceData = analytics.performance || {};
-
-            new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: ['Buscas', 'Análises IA', 'Resultados'],
-                    datasets: [{
-                        label: 'Performance (segundos)',
-                        data: [
-                            performanceData.search_duration ? performanceData.search_duration.avg / 1000 : 0,
-                            performanceData.ai_analysis_duration ? performanceData.ai_analysis_duration.avg / 1000 : 0,
-                            performanceData.results_per_search ? performanceData.results_per_search.avg : 0
-                        ],
-                        borderColor: 'rgb(59, 130, 246)',
-                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                        tension: 0.4
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            display: false
-                        }
-                    }
-                }
-            });
-        }
-
-        function updateConversionChart(analytics) {
-            const ctx = document.getElementById('conversion-chart');
-            if (!ctx) return;
-
-            // Create conversion funnel data
-            const totalSearches = analytics.userActivity?.topActions?.search_completed || 0;
-            const aiAnalyses = analytics.userActivity?.topActions?.ai_analysis_requested || 0;
-            const deepAnalyses = analytics.userActivity?.topActions?.deep_analysis_requested || 0;
-
-            new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: ['Buscas', 'Análises IA', 'Análises Profundas'],
-                    datasets: [{
-                        label: 'Atividades',
-                        data: [totalSearches, aiAnalyses, deepAnalyses],
-                        backgroundColor: [
-                            'rgba(59, 130, 246, 0.8)',
-                            'rgba(16, 185, 129, 0.8)',
-                            'rgba(245, 158, 11, 0.8)'
-                        ],
-                        borderRadius: 4
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            display: false
-                        }
-                    }
-                }
-            });
-        }
 
         function updateNeighborhoodHeatmap(analytics) {
             const container = document.getElementById('neighborhood-heatmap');

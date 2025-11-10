@@ -120,6 +120,7 @@ export default async function handler(req, res) {
      const neighborhood = NEIGHBORHOODS[currentIndex % NEIGHBORHOODS.length];
      const business = BUSINESS_TYPES[Math.floor(currentIndex / NEIGHBORHOODS.length) % BUSINESS_TYPES.length];
      const searchTerm = `${business} ${neighborhood} fortaleza`;
+     const businessType = business; // Definir businessType explicitamente
 
      // Verificar cache primeiro
      const cachedResult = await storage.getCachedSearchResult(searchTerm);
@@ -506,7 +507,7 @@ export default async function handler(req, res) {
     await storage.recordUserAction('search_completed', {
       searchTerm,
       neighborhood,
-      businessType,
+      businessType: business,
       resultsFound: validResults.length,
       duration: searchDuration
     });
