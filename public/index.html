@@ -1089,39 +1089,38 @@
                     if (response.ok) {
                         const serverData = await response.json();
                         if (serverData.success && serverData.results.length > 0) {
-                            // Filter only AI-approved companies
-                            const approvedCompanies = serverData.results.filter(company =>
-                                company.aiValidation && company.aiValidation.isValid === true
-                            );
+                            // Show ALL companies for now (we can filter later if needed)
+                            // TODO: Add toggle for showing only AI-approved companies
+                            const allCompanies = serverData.results;
 
-                            if (approvedCompanies.length > 0) {
-                                // Show only approved results
-                                addResults(approvedCompanies, false);
-                                elements.resultsTotal.textContent = approvedCompanies.length;
-                                elements.resultsShown.textContent = approvedCompanies.length;
+                            if (allCompanies.length > 0) {
+                                // Show all results
+                                addResults(allCompanies, false);
+                                elements.resultsTotal.textContent = allCompanies.length;
+                                elements.resultsShown.textContent = allCompanies.length;
 
                                 // Load searches
                                 if (serverData.previousSearches) {
                                     loadPreviousSearches(serverData.previousSearches);
                                 }
 
-                                // Update local cache with ALL server data (but display only approved)
+                                // Update local cache with ALL server data
                                 localStorage.setItem('prospectDashboardData', JSON.stringify({
-                                    results: serverData.results, // Store all for future filtering
+                                    results: serverData.results,
                                     total: serverData.total,
                                     previousSearches: serverData.previousSearches,
                                     lastSync: Date.now()
                                 }));
 
                                 const syncMessage = wasAutoSynced ?
-                                    `${approvedCompanies.length} empresas aprovadas sincronizadas (auto-sync executado)` :
-                                    `${approvedCompanies.length} empresas aprovadas sincronizadas`;
+                                    `${allCompanies.length} empresas sincronizadas (auto-sync executado)` :
+                                    `${allCompanies.length} empresas sincronizadas`;
 
-                                console.log(`Carregadas ${approvedCompanies.length} empresas aprovadas do servidor (${serverData.results.length} total)`);
+                                console.log(`Carregadas ${allCompanies.length} empresas do servidor`);
                                 showDataStatus(syncMessage, 'success');
                             } else {
-                                console.log('Nenhuma empresa aprovada encontrada no servidor');
-                                showDataStatus('Nenhuma empresa aprovada no servidor', 'warning');
+                                console.log('Nenhuma empresa encontrada no servidor');
+                                showDataStatus('Nenhuma empresa no servidor', 'warning');
                             }
                         } else {
                             // If no server data, try local cache
