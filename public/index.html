@@ -984,6 +984,60 @@
             }
         };
 
+        // Auto-sync local data to cloud if needed
+        async function autoSyncLocalToCloud() {
+            try {
+                // Check if we have local data that needs to be synced
+                const cachedData = localStorage.getItem('prospectDashboardData');
+                if (!cachedData) return false;
+
+                const localData = JSON.parse(cachedData);
+                if (!localData.results || localData.results.length === 0) return false;
+
+                // Check server data
+                const serverResponse = await fetch('/api/results?limit=1&offset=0');
+                if (!serverResponse.ok) return false;
+
+                const serverData = await serverResponse.json();
+                if (!serverData.success) return false;
+
+                // If server has much less data than local, sync local to cloud
+                const serverCount = serverData.total || 0;
+                const localCount = localData.results.length;
+
+                if (localCount > serverCount * 2) { // Local has at least 2x more data
+                    console.log(`🔄 Detectado desync: Local=${localCount}, Nuvem=${serverCount}. Sincronizando...`);
+
+                    showDataStatus('Sincronizando dados locais para nuvem...', 'info');
+
+                    const syncResponse = await fetch('/api/sync', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            action: 'merge_data',
+                            data: {
+                                companies: localData.results,
+                                stats: localData.stats || {},
+                                learning: localData.learning || {}
+                            }
+                        })
+                    });
+
+                    const syncResult = await syncResponse.json();
+                    if (syncResult.success) {
+                        console.log(`✅ Auto-sincronização concluída: ${syncResult.mergedCount} novos, ${syncResult.updatedCount} atualizados`);
+                        showDataStatus(`Sincronização automática concluída`, 'success');
+                        return true;
+                    }
+                }
+
+                return false;
+            } catch (error) {
+                console.error('Erro na auto-sincronização:', error);
+                return false;
+            }
+        }
+
         // Load initial data with persistence
         async function loadInitialData() {
             try {
@@ -1022,6 +1076,9 @@
                 if (isOnline) {
                     showDataStatus('Sincronizando com servidor...');
 
+                    // Try auto-sync first
+                    const wasAutoSynced = await autoSyncLocalToCloud();
+
                     // Load ALL results from server (not just first page)
                     const response = await fetch('/api/results?limit=1000&offset=0&includeSearches=true');
                     if (response.ok) {
@@ -1051,8 +1108,12 @@
                                     lastSync: Date.now()
                                 }));
 
+                                const syncMessage = wasAutoSynced ?
+                                    `${approvedCompanies.length} empresas aprovadas sincronizadas (auto-sync executado)` :
+                                    `${approvedCompanies.length} empresas aprovadas sincronizadas`;
+
                                 console.log(`Carregadas ${approvedCompanies.length} empresas aprovadas do servidor (${serverData.results.length} total)`);
-                                showDataStatus(`${approvedCompanies.length} empresas aprovadas sincronizadas`, 'success');
+                                showDataStatus(syncMessage, 'success');
                             } else {
                                 console.log('Nenhuma empresa aprovada encontrada no servidor');
                                 showDataStatus('Nenhuma empresa aprovada no servidor', 'warning');
