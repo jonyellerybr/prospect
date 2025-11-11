@@ -18,10 +18,14 @@ export default async function handler(req, res) {
 
       // Buscar todas as empresas
       const allCompanies = await storage.getAllCompanies();
+      console.log(`📊 Total de registros no storage: ${allCompanies.length}`);
 
       // Separar empresas e buscas
       let companies = allCompanies.filter(company => company.foundAt);
       const searches = allCompanies.filter(company => company.completedAt && !company.foundAt);
+
+      console.log(`📊 Empresas encontradas: ${companies.length}`);
+      console.log(`📊 Buscas realizadas: ${searches.length}`);
 
       // Aplicar filtros
       if (neighborhood) {
