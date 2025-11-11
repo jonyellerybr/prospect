@@ -81,6 +81,21 @@ async function readBlobData(key) {
   }
 }
 
+async function ensureBlobData(key, defaultData) {
+  try {
+    const existing = await readBlobData(key);
+    if (existing !== null) return existing;
+
+    // Create the file with default data
+    await writeBlobData(key, defaultData);
+    console.log(`📁 Initialized blob ${key} with default data`);
+    return defaultData;
+  } catch (error) {
+    console.error(`Error ensuring blob ${key}:`, error);
+    return defaultData;
+  }
+}
+
 async function writeBlobData(key, data) {
   try {
     const blob = await put(key, JSON.stringify(data, null, 2), {
@@ -101,8 +116,7 @@ export const storage = {
 
   async getCompanies() {
     if (USE_BLOB_STORAGE) {
-      const data = await readBlobData(COMPANIES_KEY);
-      return data || {};
+      return await ensureBlobData(COMPANIES_KEY, {});
     } else {
       try {
         const data = fs.readFileSync(COMPANIES_FILE, 'utf8');
@@ -157,13 +171,12 @@ export const storage = {
   // Stats storage
   async getStats() {
     if (USE_BLOB_STORAGE) {
-      const data = await readBlobData(STATS_KEY);
-      return data || {
+      return await ensureBlobData(STATS_KEY, {
         totalSearches: 0,
         totalResults: 0,
         neighborhoods: {},
         businesses: {}
-      };
+      });
     } else {
       try {
         const data = fs.readFileSync(STATS_FILE, 'utf8');
@@ -256,8 +269,7 @@ export const storage = {
   // Learning data storage
   async getLearningData() {
     if (USE_BLOB_STORAGE) {
-      const data = await readBlobData(LEARNING_KEY);
-      return data || {
+      return await ensureBlobData(LEARNING_KEY, {
         successfulSearches: [],
         failedSearches: [],
         bestNeighborhoods: {},
@@ -265,7 +277,7 @@ export const storage = {
         bestStrategies: {},
         totalSearches: 0,
         successRate: 0
-      };
+      });
     } else {
       try {
         const data = fs.readFileSync(LEARNING_FILE, 'utf8');
@@ -302,13 +314,12 @@ export const storage = {
   // ==================== CACHE SYSTEM ====================
   async getCache() {
     if (USE_BLOB_STORAGE) {
-      const data = await readBlobData(CACHE_KEY);
-      return data || {
+      return await ensureBlobData(CACHE_KEY, {
         searchResults: {},
         companyAnalyses: {},
         reports: {},
         lastCleanup: Date.now()
-      };
+      });
     } else {
       try {
         const data = fs.readFileSync(CACHE_FILE, 'utf8');
