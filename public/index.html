@@ -1118,68 +1118,6 @@
         loadInitialData();
         loadStats();
 
-        // Start smart auto-refresh system
-        startSmartAutoRefresh();
-
-        // Smart auto-refresh system
-        let lastDataHash = null;
-        let autoRefreshInterval = null;
-
-        // Calculate simple hash of data for change detection
-        function calculateDataHash(data) {
-            if (!data) return null;
-            const str = JSON.stringify({
-                total: data.total,
-                companiesCount: data.results?.length || 0,
-                lastUpdate: data.results?.[0]?.foundAt
-            });
-            let hash = 0;
-            for (let i = 0; i < str.length; i++) {
-                const char = str.charCodeAt(i);
-                hash = ((hash << 5) - hash) + char;
-                hash = hash & hash; // Convert to 32-bit integer
-            }
-            return hash.toString();
-        }
-
-        // Check for data changes
-        async function checkForDataChanges() {
-            if (!isOnline) return;
-
-            try {
-                const response = await fetch('/api/results?limit=1&offset=0');
-                if (!response.ok) return;
-
-                const data = await response.json();
-                if (!data.success) return;
-
-                const currentHash = calculateDataHash(data);
-
-                if (lastDataHash && lastDataHash !== currentHash) {
-                    console.log('Data changes detected, updating dashboard...');
-                    showDataStatus('Novos dados disponíveis - atualizando...', 'info');
-
-                    // Update all data from single API call
-                    await loadStats();
-                    await loadResults();
-
-                    showDataStatus('Dashboard atualizado automaticamente', 'success');
-                }
-
-                lastDataHash = currentHash;
-            } catch (error) {
-                console.error('Error checking for data changes:', error);
-            }
-        }
-
-        // Start smart auto-refresh (check every 3 minutes)
-        function startSmartAutoRefresh() {
-            if (autoRefreshInterval) clearInterval(autoRefreshInterval);
-
-            autoRefreshInterval = setInterval(checkForDataChanges, 180000); // 3 minutes
-            console.log('Smart auto-refresh started (checks every 3 minutes)');
-        }
-
         // Manual refresh function
         async function manualRefresh() {
             if (!isOnline) {
@@ -1199,13 +1137,6 @@
                 // Update both stats and results
                 await loadStats();
                 await loadResults();
-
-                // Reset hash after manual refresh
-                const response = await fetch('/api/results?limit=1&offset=0');
-                if (response.ok) {
-                    const data = await response.json();
-                    lastDataHash = calculateDataHash(data);
-                }
 
                 showDataStatus('Dados atualizados com sucesso', 'success');
             } catch (error) {
