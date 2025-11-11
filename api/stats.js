@@ -21,8 +21,16 @@ export default async function handler(req, res) {
       .sort((a, b) => b.hits - a.hits)
       .slice(0, 10);
 
-    // Total de empresas únicas
+    // Total de empresas únicas e contagem por bairro
     const allCompanies = await storage.getAllCompanies();
+
+    // Contar empresas por bairro (das empresas encontradas)
+    const companiesByNeighborhood = {};
+    allCompanies.forEach(company => {
+      if (company.neighborhood) {
+        companiesByNeighborhood[company.neighborhood] = (companiesByNeighborhood[company.neighborhood] || 0) + 1;
+      }
+    });
 
     // Buscar dados de aprendizado
     const learning = await storage.getLearningData();
@@ -51,7 +59,7 @@ export default async function handler(req, res) {
         averagePerSearch: stats.totalSearches > 0
           ? (parseInt(stats.totalResults || 0) / parseInt(stats.totalSearches || 0)).toFixed(2)
           : 0,
-        neighborhoodHits: stats.neighborhoods || {}
+        companiesByNeighborhood: companiesByNeighborhood
       },
       learning: {
         successRate: learning.successRate + '%',

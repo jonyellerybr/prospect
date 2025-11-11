@@ -1258,8 +1258,8 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        // Get neighborhood hits from general stats
-                        const neighborhoodStats = data.general.neighborhoodHits || {};
+                        // Get companies by neighborhood (where companies were actually found)
+                        const neighborhoodStats = data.general.companiesByNeighborhood || {};
 
                         // Convert to array and sort by hits (descending)
                         const neighborhoods = Object.entries(neighborhoodStats)
@@ -1292,7 +1292,7 @@
                                 return `
                                     <div class="${bgColor} ${textColor} rounded-lg p-3 text-center">
                                         <div class="font-semibold text-sm">${neighborhood.name}</div>
-                                        <div class="text-xs opacity-90">${neighborhood.score} buscas</div>
+                                        <div class="text-xs opacity-90">${neighborhood.score} empresas</div>
                                         <div class="text-xs opacity-75">${intensity}%</div>
                                     </div>
                                 `;
