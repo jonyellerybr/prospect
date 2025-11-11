@@ -6,9 +6,9 @@ import { existsSync, readFileSync } from "node:fs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = dirname(__dirname);
 
-async function syncLocalDataToBlob() {
+async function prepareLocalDataForDeploySync() {
   try {
-    console.log("🔄 Sincronizando dados locais para Vercel Blob Storage...");
+    console.log("🔄 Preparando dados locais para sincronização durante deploy...");
 
     // Caminhos dos arquivos locais
     const dataDir = join(projectRoot, "data");
@@ -19,7 +19,7 @@ async function syncLocalDataToBlob() {
 
     // Verificar se os arquivos existem
     if (!existsSync(dataDir)) {
-      console.log("⚠️  Pasta data não encontrada, pulando sincronização");
+      console.log("⚠️  Pasta data não encontrada, pulando preparação");
       return;
     }
 
@@ -37,48 +37,31 @@ async function syncLocalDataToBlob() {
     // Verificar se há dados significativos para sincronizar
     const hasData = Object.keys(companies).length > 0 || (stats.totalSearches || 0) > 0;
     if (!hasData) {
-      console.log("⚠️  Nenhum dado significativo encontrado, pulando sincronização");
+      console.log("⚠️  Nenhum dado significativo encontrado, pulando preparação");
       return;
     }
 
-    // Preparar dados para sincronização
-    const localData = {
+    // Criar arquivo de dados preparados para sincronização durante cold start
+    const syncData = {
       companies: Object.values(companies), // Converter objeto para array
       stats: stats,
       learning: learning,
-      cache: cache
+      cache: cache,
+      timestamp: Date.now(),
+      version: '1.0',
+      needsSync: true
     };
 
-    // Fazer requisição para a API de sync (usando fetch nativo do Node)
-    const { default: fetch } = await import('node-fetch');
+    // Salvar em arquivo que será usado durante o cold start do Vercel
+    const syncFile = join(dataDir, 'deploy-sync.json');
+    require('fs').writeFileSync(syncFile, JSON.stringify(syncData, null, 2));
 
-    const response = await fetch('https://prospect.vercel.app/api/sync', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'Vercel-Build-Sync/1.0'
-      },
-      body: JSON.stringify({
-        action: 'sync_to_cloud',
-        data: localData
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const result = await response.json();
-
-    if (result.success) {
-      console.log(`✅ Sincronização concluída: ${result.syncedCount} itens enviados para a nuvem`);
-    } else {
-      console.error('❌ Erro na sincronização:', result.error);
-    }
+    console.log(`✅ Dados preparados para sincronização durante deploy: ${Object.keys(companies).length} empresas`);
+    console.log(`📁 Arquivo criado: ${syncFile}`);
 
   } catch (error) {
-    console.error('❌ Erro ao sincronizar dados:', error.message);
-    console.log('⚠️  Sincronização falhou, mas build continuará');
+    console.error('❌ Erro ao preparar dados para sincronização:', error.message);
+    console.log('⚠️  Preparação falhou, mas build continuará');
   }
 }
 
@@ -86,8 +69,8 @@ async function main() {
   try {
     console.log("📦 Starting postinstall script...");
 
-    // Primeiro, sincronizar dados locais para a nuvem (se houver dados)
-    await syncLocalDataToBlob();
+    // Primeiro, preparar dados locais para sincronização durante deploy
+    await prepareLocalDataForDeploySync();
 
     // Resolve chromium package location
     const chromiumResolvedPath = import.meta.resolve("@sparticuz/chromium");
