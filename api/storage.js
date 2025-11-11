@@ -81,6 +81,54 @@ async function readBlobData(key) {
   }
 }
 
+// Função para sincronizar dados locais preparados durante deploy
+async function syncDeployData() {
+  if (!USE_BLOB_STORAGE) return;
+
+  try {
+    // Verificar se há arquivo de sync preparado durante deploy
+    const deploySyncPath = path.join(__dirname, '..', 'data', 'deploy-sync.json');
+
+    if (fs.existsSync(deploySyncPath)) {
+      console.log('🔄 Arquivo deploy-sync.json encontrado, sincronizando dados locais...');
+
+      const deployData = JSON.parse(fs.readFileSync(deploySyncPath, 'utf8'));
+
+      // Sincronizar empresas
+      if (deployData.companies && Array.isArray(deployData.companies)) {
+        for (const company of deployData.companies) {
+          if (company.foundAt) {
+            const key = `company:${Buffer.from(company.url).toString('base64').substring(0, 50)}`;
+            await storage.saveCompany(key, company);
+          } else if (company.completedAt) {
+            const key = `search:${Buffer.from(company.searchTerm).toString('base64')}`;
+            await storage.saveCompany(key, company);
+          }
+        }
+        console.log(`✅ ${deployData.companies.length} empresas sincronizadas`);
+      }
+
+      // Sincronizar estatísticas
+      if (deployData.stats) {
+        await storage.updateStats(deployData.stats);
+        console.log('✅ Estatísticas sincronizadas');
+      }
+
+      // Sincronizar dados de aprendizado
+      if (deployData.learning) {
+        await storage.saveLearningData(deployData.learning);
+        console.log('✅ Dados de aprendizado sincronizados');
+      }
+
+      // Remover arquivo após sync para não sincronizar novamente
+      fs.unlinkSync(deploySyncPath);
+      console.log('🗑️ Arquivo deploy-sync.json removido após sincronização');
+    }
+  } catch (error) {
+    console.error('Erro na sincronização automática:', error);
+  }
+}
+
 async function ensureBlobData(key, defaultData) {
   try {
     const existing = await readBlobData(key);
@@ -521,3 +569,8 @@ export const storage = {
  },
 
 };
+
+// Inicializar sincronização automática durante cold start
+if (USE_BLOB_STORAGE) {
+ syncDeployData();
+}

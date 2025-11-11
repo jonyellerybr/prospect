@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vercel dev",
     "deploy": "vercel --prod",
-    "postinstall": "node scripts/postinstall.mjs"
+    "postinstall": "node scripts/postinstall.mjs",
+    "sync-local-to-blob": "node scripts/sync-local-to-blob.js",
+    "sync-blob-to-local": "node scripts/sync-blob-to-local.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
