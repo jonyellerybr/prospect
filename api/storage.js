@@ -100,7 +100,8 @@ async function writeBlobData(key, data) {
   try {
     const blob = await put(key, JSON.stringify(data, null, 2), {
       access: 'public',
-      contentType: 'application/json'
+      contentType: 'application/json',
+      allowOverwrite: true
     });
     console.log(`💾 Blob saved: ${key}`);
     return true;
