@@ -82,6 +82,7 @@ export default async function handler(req, res) {
     }
 
     if (action === 'analyze_company_deep' && companyId) {
+      console.log('Ação recebida: analyze_company_deep, companyId:', companyId);
       // Verificar cache primeiro
       const cachedAnalysis = await storage.getCachedCompanyAnalysis(`${companyId}_deep`);
       if (cachedAnalysis) {
@@ -95,10 +96,64 @@ export default async function handler(req, res) {
       }
 
       // Buscar empresa específica
-      const company = await storage.getCompany(companyId);
+      console.log('Buscando empresa com ID:', companyId);
+      let company = await storage.getCompany(companyId);
+      console.log('Empresa encontrada diretamente:', company ? 'SIM' : 'NÃO');
 
       if (!company) {
-        return res.status(404).json({ error: 'Empresa não encontrada' });
+        console.log('Empresa não encontrada no storage. Tentando buscar por URL...');
+
+        // Tentar encontrar empresa por URL (caso o ID não corresponda)
+        const allCompanies = await storage.getAllCompanies();
+        console.log('Total de empresas no storage:', allCompanies.length);
+
+        // Procurar empresa que tenha URL similar
+        let foundCompany = null;
+        try {
+          const decodedUrl = atob(companyId);
+          console.log('URL decodificada:', decodedUrl);
+
+          for (const comp of allCompanies) {
+            if (comp.url && comp.url.includes(decodedUrl)) {
+              foundCompany = comp;
+              console.log('Empresa encontrada por URL:', comp.title);
+              break;
+            }
+          }
+        } catch (decodeError) {
+          console.log('Erro ao decodificar companyId:', decodeError.message);
+        }
+
+        if (!foundCompany) {
+          console.log('Empresa ainda não encontrada. Tentando busca mais ampla...');
+
+          // Tentar busca mais ampla - procurar por qualquer parte da URL
+          for (const comp of allCompanies) {
+            if (comp.url && decodedUrl) {
+              // Tentar match exato primeiro
+              if (comp.url === decodedUrl) {
+                foundCompany = comp;
+                console.log('Empresa encontrada por URL exata:', comp.title);
+                break;
+              }
+              // Depois tentar substring
+              if (comp.url.includes(decodedUrl.substring(0, 30))) {
+                foundCompany = comp;
+                console.log('Empresa encontrada por substring da URL:', comp.title);
+                break;
+              }
+            }
+          }
+
+          if (!foundCompany) {
+            console.log('Empresa definitivamente não encontrada. Listando primeiras empresas:');
+            console.log('Primeiras 5 empresas:', allCompanies.slice(0, 5).map(c => ({ title: c.title, url: c.url?.substring(0, 50) })));
+            return res.status(404).json({ error: 'Empresa não encontrada. Tente recarregar a página.' });
+          }
+        }
+
+        // Usar empresa encontrada
+        company = foundCompany;
       }
 
       // Record analytics
@@ -106,13 +161,18 @@ export default async function handler(req, res) {
       const analysisStartTime = Date.now();
 
       // Análise profunda com IA
+      console.log('Iniciando análise profunda para empresa:', company.title);
       const analysis = await analyzeCompanyDeep(company);
+      console.log('Análise profunda concluída');
 
       // Análise de sentimento
+      console.log('Analisando sentimento...');
       const sentiment = await analyzeSentiment(company.description || company.title);
 
       // Recomendações de abordagem
+      console.log('Gerando predição de conversão...');
       const prediction = await generateConversionPrediction(company);
+      console.log('Gerando recomendações de abordagem...');
       const approachRecs = await generateApproachRecommendations(company, prediction);
 
       // Combinar análises
@@ -123,6 +183,8 @@ export default async function handler(req, res) {
         approachRecommendations: approachRecs,
         analysisDate: new Date().toISOString()
       };
+
+      console.log('Análise completa gerada com sucesso');
 
       // Record performance
       const analysisDuration = Date.now() - analysisStartTime;
@@ -140,6 +202,7 @@ export default async function handler(req, res) {
       company.deepAnalysis = enhancedAnalysis;
       await storage.saveCompany(companyId, company);
 
+      console.log('Enviando resposta da análise');
       return res.status(200).json({
         success: true,
         analysis: enhancedAnalysis
@@ -191,6 +254,7 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('❌ Erro na análise:', error);
+    console.error('Stack trace:', error.stack);
 
     return res.status(500).json({
       success: false,

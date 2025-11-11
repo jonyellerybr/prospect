@@ -30,34 +30,60 @@ function getNextMistralKey() {
 // Classe para integração com Gemini
 class GeminiService {
   constructor() {
-    this.genAI = null;
-    this.model = null;
+    this.apiKey = null;
     this.initialize();
   }
 
   initialize() {
-    const apiKey = getNextGeminiKey();
-    if (apiKey) {
-      this.genAI = new GoogleGenerativeAI(apiKey);
-      this.model = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-    }
+    this.apiKey = getNextGeminiKey();
   }
 
-  async generateContent(prompt) {
+  async generateContent(prompt, timeout = 20000) {
     try {
-      if (!this.model) {
-        throw new Error('Gemini model not initialized');
+      if (!this.apiKey) {
+        throw new Error('Gemini API key not available');
       }
 
-      const result = await this.model.generateContent(prompt);
-      const response = await result.response;
-      return response.text();
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeout);
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${this.apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
+          }),
+          signal: controller.signal
+        }
+      );
+
+      clearTimeout(timer);
+
+      if (!response.ok) {
+        if (response.status === 429 || response.status === 401) {
+          // Tentar com próxima chave
+          if (GEMINI_KEYS.length > 1) {
+            this.initialize();
+            return this.generateContent(prompt, timeout);
+          }
+        }
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const result = await response.json();
+      const text = result?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (text) return text;
+
+      throw new Error('Empty response from Gemini');
     } catch (error) {
       console.error('Gemini API error:', error);
       // Tentar com próxima chave se disponível
       if (GEMINI_KEYS.length > 1) {
         this.initialize();
-        return this.generateContent(prompt);
+        return this.generateContent(prompt, timeout);
       }
       throw error;
     }
@@ -67,37 +93,65 @@ class GeminiService {
 // Classe para integração com Mistral
 class MistralService {
   constructor() {
-    this.client = null;
+    this.apiKey = null;
     this.initialize();
   }
 
   initialize() {
-    const apiKey = getNextMistralKey();
-    if (apiKey) {
-      this.client = new Mistral({ apiKey });
-    }
+    this.apiKey = getNextMistralKey();
   }
 
-  async generateContent(prompt) {
+  async generateContent(prompt, timeout = 20000) {
     try {
-      if (!this.client) {
-        throw new Error('Mistral client not initialized');
+      if (!this.apiKey) {
+        throw new Error('Mistral API key not available');
       }
 
-      const response = await this.client.chat({
-        model: 'mistral-medium',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 1000,
-        temperature: 0.7
-      });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeout);
 
-      return response.choices[0].message.content;
+      const response = await fetch(
+        'https://api.mistral.ai/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.apiKey}`
+          },
+          body: JSON.stringify({
+            model: 'mistral-large-latest',
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: 2048,
+            temperature: 0.7
+          }),
+          signal: controller.signal
+        }
+      );
+
+      clearTimeout(timer);
+
+      if (!response.ok) {
+        if (response.status === 429 || response.status === 401) {
+          // Tentar com próxima chave
+          if (MISTRAL_KEYS.length > 1) {
+            this.initialize();
+            return this.generateContent(prompt, timeout);
+          }
+        }
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const result = await response.json();
+      const text = result?.choices?.[0]?.message?.content?.trim();
+      if (text) return text;
+
+      throw new Error('Empty response from Mistral');
     } catch (error) {
       console.error('Mistral API error:', error);
       // Tentar com próxima chave se disponível
       if (MISTRAL_KEYS.length > 1) {
         this.initialize();
-        return this.generateContent(prompt);
+        return this.generateContent(prompt, timeout);
       }
       throw error;
     }

@@ -507,16 +507,24 @@
             const noResultsMessage = document.getElementById('no-results-message');
 
             if (!append) {
-                elements.resultsContainer.innerHTML = '';
-                loadingIndicator.style.display = 'none';
+                if (elements.resultsContainer) {
+                    elements.resultsContainer.innerHTML = '';
+                }
+                if (loadingIndicator) {
+                    loadingIndicator.style.display = 'none';
+                }
             }
 
             if (results.length === 0 && !append) {
-                noResultsMessage.classList.remove('hidden');
+                if (noResultsMessage) {
+                    noResultsMessage.classList.remove('hidden');
+                }
                 return;
             }
 
-            noResultsMessage.classList.add('hidden');
+            if (noResultsMessage) {
+                noResultsMessage.classList.add('hidden');
+            }
 
             results.forEach(result => {
                 const div = document.createElement('div');
@@ -542,7 +550,7 @@
                     </a>
                     <p class="text-gray-600 text-sm">${result.description ? result.description.substring(0, 150) + '...' : 'Sem descrição'}</p>
                     <div class="mt-3 flex gap-2">
-                        <button onclick="analyzeCompany('${result.url.replace(/'/g, "\\'")}')" class="bg-indigo-500 text-white text-xs px-3 py-1 rounded hover:bg-indigo-600 transition-colors">
+                        <button onclick="analyzeCompany('${result.url.replace(/'/g, '\\\'')}')" class="bg-indigo-500 text-white text-xs px-3 py-1 rounded hover:bg-indigo-600 transition-colors">
                             <i class="fas fa-brain mr-1"></i>Analisar IA
                         </button>
                         <button onclick="openCompany('${result.url}')" class="bg-green-500 text-white text-xs px-3 py-1 rounded hover:bg-green-600 transition-colors">
@@ -550,7 +558,9 @@
                         </button>
                     </div>
                 `;
-                elements.resultsContainer.appendChild(div);
+                if (elements.resultsContainer) {
+                    elements.resultsContainer.appendChild(div);
+                }
             });
         }
 
@@ -565,8 +575,10 @@
 
         async function analyzeCompany(url) {
             if (confirm('Deseja analisar esta empresa com IA? Isso pode levar alguns segundos.')) {
-                // Encontrar o ID da empresa
+                // Encontrar o ID da empresa baseado na URL
                 const companyId = btoa(url).substring(0, 50);
+                console.log('Analisando empresa:', companyId, 'URL:', url);
+
                 try {
                     // Show loading state
                     const button = event.target.closest('button');
@@ -584,21 +596,26 @@
                     });
 
                     const data = await response.json();
+                    console.log('Resposta da análise:', data);
+
                     if (data.success) {
                         // Show detailed analysis modal
                         showAnalysisModal(data.analysis, url);
                         loadResults(); // Recarregar para mostrar análise
                         loadStats(); // Update analytics
                     } else {
-                        alert('Erro na análise: ' + data.error);
+                        console.error('Erro na análise:', data.error);
+                        alert('Erro na análise: ' + (data.error || 'Empresa não encontrada'));
                     }
                 } catch (error) {
+                    console.error('Erro ao analisar empresa:', error);
                     alert('Erro ao analisar empresa: ' + error.message);
                 } finally {
                     // Restore button state
-                    if (button) {
-                        button.innerHTML = originalText;
-                        button.disabled = false;
+                    const currentButton = event.target.closest('button');
+                    if (currentButton) {
+                        currentButton.innerHTML = originalText;
+                        currentButton.disabled = false;
                     }
                 }
             }
@@ -1098,16 +1115,25 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    // Basic stats
-                    document.getElementById('stat-companies').textContent = data.general.uniqueCompanies;
-                    document.getElementById('stat-searches').textContent = data.general.totalSearches;
-                    document.getElementById('stat-average').textContent = data.general.averagePerSearch;
-                    document.getElementById('stat-success-rate').textContent = data.learning.successRate;
+                    // Basic stats - verificar se elementos existem antes de usar
+                    const statCompaniesEl = document.getElementById('stat-companies');
+                    const statSearchesEl = document.getElementById('stat-searches');
+                    const statAverageEl = document.getElementById('stat-average');
+                    const statSuccessRateEl = document.getElementById('stat-success-rate');
+
+                    if (statCompaniesEl) statCompaniesEl.textContent = data.general.uniqueCompanies;
+                    if (statSearchesEl) statSearchesEl.textContent = data.general.totalSearches;
+                    if (statAverageEl) statAverageEl.textContent = data.general.averagePerSearch;
+                    if (statSuccessRateEl) statSuccessRateEl.textContent = data.learning.successRate;
 
                     // Learning stats
-                    document.getElementById('learning-searches').textContent = data.learning.totalLearningSearches;
-                    document.getElementById('learning-successes').textContent = data.learning.successfulSearches;
-                    document.getElementById('learning-failures').textContent = data.learning.failedSearches;
+                    const learningSearchesEl = document.getElementById('learning-searches');
+                    const learningSuccessesEl = document.getElementById('learning-successes');
+                    const learningFailuresEl = document.getElementById('learning-failures');
+
+                    if (learningSearchesEl) learningSearchesEl.textContent = data.learning.totalLearningSearches;
+                    if (learningSuccessesEl) learningSuccessesEl.textContent = data.learning.successfulSearches;
+                    if (learningFailuresEl) learningFailuresEl.textContent = data.learning.failedSearches;
 
                     // Analytics data
                     if (data.analytics) {
@@ -1115,10 +1141,12 @@
                     }
 
                     // Top bairros do aprendizado
-                    const neighborhoodsHtml = data.learning.topNeighborhoods.map(n =>
-                        `<span class="bg-indigo-100 text-indigo-800 px-2 py-1 rounded text-xs">${n.name} (${n.score})</span>`
-                    ).join(' ');
-                    elements.topLearningNeighborhoods.innerHTML = neighborhoodsHtml || '<span class="text-gray-500 text-xs">Nenhum dado ainda</span>';
+                    if (data.learning.topNeighborhoods && elements.topLearningNeighborhoods) {
+                        const neighborhoodsHtml = data.learning.topNeighborhoods.map(n =>
+                            `<span class="bg-indigo-100 text-indigo-800 px-2 py-1 rounded text-xs">${n.name} (${n.score})</span>`
+                        ).join(' ');
+                        elements.topLearningNeighborhoods.innerHTML = neighborhoodsHtml || '<span class="text-gray-500 text-xs">Nenhum dado ainda</span>';
+                    }
                 }
             } catch (error) {
                 console.error('Erro ao carregar stats:', error);
@@ -1221,13 +1249,16 @@
         loadInitialData();
         loadStats();
 
-        // Auto-refresh stats and sync data
+        // Auto-refresh data every 30 seconds
         setInterval(() => {
-            loadStats();
             if (isOnline) {
-                syncDataWithServer();
+                loadResults();
+                loadStats();
             }
         }, 30000);
+
+        // Auto-refresh stats and sync data (removido para evitar duplicação)
+        // O refresh agora é feito junto com loadResults
 
         // Offline support
         window.addEventListener('online', handleOnline);

@@ -250,7 +250,10 @@ export default async function handler(req, res) {
                    !href.includes('translate.google.com') &&
                    !href.includes('maps.google.com') &&
                    !href.includes('books.google.com') &&
-                   !href.includes('news.google.com');
+                   !href.includes('news.google.com') &&
+                   !href.includes('tripadvisor.com') &&
+                   !href.includes('ifood.com') &&
+                   !href.includes('uber.com');
           });
 
           console.log(`🔍 Encontrados ${allLinks.length} links válidos na página...`);
@@ -332,7 +335,8 @@ export default async function handler(req, res) {
             /tripadvisor/i, /yelp/i, /ifood/i, /uber eats/i,
             /restaurantes.*fortaleza/i, /melhores.*restaurantes/i,
             /top.*restaurantes/i, /guias.*restaurantes/i,
-            /restaurante.*em.*fortaleza/i, /onde.*comer/i
+            /restaurante.*em.*fortaleza/i, /onde.*comer/i,
+            /polo.*gastronômico/i, /10.*restaurantes/i, /restaurantes.*nas.*proximidades/i
           ];
 
           const shouldReject = rejectPatterns.some(pattern =>
@@ -346,19 +350,21 @@ export default async function handler(req, res) {
 
           // Verificar se parece ser uma empresa individual baseada no título
           const businessIndicators = [
-            /\b(restaurante|bar|lanchonete|pizzaria|hamburgueria|açaiteria|padaria|cafeteria)\b/i,
+            /\b(restaurante|bar|lanchonete|pizzaria|hamburgueria|açaiteria|padaria|cafeteria|churrascaria|sorveteria)\b/i,
             /\b(advogado|escritório|dentista|clínica|psicólogo|nutricionista)\b/i,
             /\b(salão|barbearia|estética|manicure|depilação|spa)\b/i,
             /\b(academia|personal|crossfit|pilates|yoga|fisioterapia)\b/i,
-            /\b(pet.*shop|veterinário|banho.*tosa)\b/i,
-            /\b(mecânica|auto.*center|lava.*jato)\b/i,
-            /\b(loja|boutique|moda|roupas|calçados|joalheria)\b/i,
+            /\b(pet.*shop|veterinário|banho.*tosa|petshop)\b/i,
+            /\b(mecânica|auto.*center|lava.*jato|borracharia)\b/i,
+            /\b(loja|boutique|moda|roupas|calçados|joalheria|perfumaria)\b/i,
             /\b(farmácia|drogaria|manipulação)\b/i,
-            /\b(construtora|engenharia|reformas|pinturas|marcenaria)\b/i,
+            /\b(construtora|engenharia|reformas|pinturas|marcenaria|eletricista)\b/i,
             /\b(contabilidade|consultoria|imobiliária|corretor)\b/i,
-            /\b(escola|curso|idiomas|pré.*vestibular)\b/i,
-            /\b(assistência.*técnica|informática|eletrônica)\b/i,
-            /\b(fotografia|decoração|design|floricultura|chaveiro)\b/i
+            /\b(escola|curso|idiomas|pré.*vestibular|cursinho)\b/i,
+            /\b(assistência.*técnica|informática|eletrônica|celular)\b/i,
+            /\b(fotografia|decoração|design|floricultura|chaveiro|encanador)\b/i,
+            /\b(hotel|motel|pousada|hostel)\b/i,
+            /\b(livraria|papelaria|material.*escolar)\b/i
           ];
 
           const hasBusinessIndicator = businessIndicators.some(pattern =>
@@ -400,6 +406,8 @@ export default async function handler(req, res) {
     console.log(`📊 Extraídos ${validResults.length} resultados válidos`);
 
     // Salvar no JSON storage e atualizar aprendizado
+    console.log(`💾 Salvando ${validResults.length} resultados válidos...`);
+
     if (validResults.length > 0) {
       const timestamp = Date.now();
 
@@ -432,9 +440,12 @@ export default async function handler(req, res) {
 
       // Atualizar sistema de aprendizado
       await updateLearning(searchTerm, neighborhood, business, 'google_search', validResults.length);
+
+      console.log(`✅ Busca concluída: ${validResults.length} empresas salvas`);
     } else {
       // Mesmo sem resultados, atualizar aprendizado para estratégia pouco efetiva
       await updateLearning(searchTerm, neighborhood, business, 'google_search', 0);
+      console.log(`⚠️ Busca concluída sem resultados válidos`);
     }
 
 
