@@ -835,47 +835,63 @@
         }
 
 
-        // Simplified loadResults - no offline support or localStorage
+        // Load results directly from Blob Storage
         loadResults = async function(append = false, applyCurrentFilters = false) {
             try {
-                const limit = append ? resultsPerPage : 50;
-                const offset = append ? currentOffset : 0;
+                // Load companies from Blob Storage
+                const companiesResponse = await fetch('https://prospect-blob.public.blob.vercel-storage.com/companies.json');
+                if (companiesResponse.ok) {
+                    const companiesData = await companiesResponse.json();
+                    let allCompanies = Object.values(companiesData || {});
 
-                // Build query parameters
-                let queryParams = `limit=${limit}&offset=${offset}&includeSearches=true`;
+                    // Apply filters if requested
+                    if (applyCurrentFilters) {
+                        if (currentFilters.neighborhood) {
+                            allCompanies = allCompanies.filter(company =>
+                                company.neighborhood === currentFilters.neighborhood
+                            );
+                        }
+                        if (currentFilters.businessType) {
+                            allCompanies = allCompanies.filter(company =>
+                                company.businessType === currentFilters.businessType
+                            );
+                        }
 
-                if (applyCurrentFilters) {
-                    if (currentFilters.neighborhood) queryParams += `&neighborhood=${encodeURIComponent(currentFilters.neighborhood)}`;
-                    if (currentFilters.businessType) queryParams += `&businessType=${encodeURIComponent(currentFilters.businessType)}`;
-                    if (currentFilters.dateRange) queryParams += `&dateRange=${encodeURIComponent(currentFilters.dateRange)}`;
-                    if (currentFilters.sortBy) queryParams += `&sortBy=${encodeURIComponent(currentFilters.sortBy)}`;
-                }
+                        // Sort results
+                        switch (currentFilters.sortBy) {
+                            case 'name':
+                                allCompanies.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+                                break;
+                            case 'neighborhood':
+                                allCompanies.sort((a, b) => (a.neighborhood || '').localeCompare(b.neighborhood || ''));
+                                break;
+                            case 'date':
+                            default:
+                                allCompanies.sort((a, b) => (b.foundAt || 0) - (a.foundAt || 0));
+                                break;
+                        }
+                    }
 
-                const response = await fetch(`/api/results?${queryParams}`);
-                const data = await response.json();
-
-                if (data.success) {
                     if (!append) {
                         elements.resultsContainer.innerHTML = '';
                     }
 
-                    if (data.results.length > 0) {
-                        addResults(data.results, append);
+                    const limit = append ? resultsPerPage : 50;
+                    const offset = append ? currentOffset : 0;
+                    const paginatedCompanies = allCompanies.slice(offset, offset + limit);
+
+                    if (paginatedCompanies.length > 0) {
+                        addResults(paginatedCompanies, append);
                     } else if (!append) {
                         elements.resultsContainer.innerHTML = '<p class="text-gray-500 text-center py-8">Nenhum resultado encontrado com os filtros aplicados</p>';
                     }
 
-                    elements.resultsTotal.textContent = data.total;
+                    elements.resultsTotal.textContent = allCompanies.length;
                     elements.resultsShown.textContent = append ?
-                        Math.min(currentOffset + data.results.length, data.total) :
-                        Math.min(data.results.length, data.total);
+                        Math.min(currentOffset + paginatedCompanies.length, allCompanies.length) :
+                        Math.min(paginatedCompanies.length, allCompanies.length);
 
-                    elements.loadMoreBtn.style.display = data.pagination.hasMore ? 'block' : 'none';
-
-                    // Carregar buscas anteriores
-                    if (data.previousSearches) {
-                        loadPreviousSearches(data.previousSearches);
-                    }
+                    elements.loadMoreBtn.style.display = (offset + paginatedCompanies.length) < allCompanies.length ? 'block' : 'none';
                 }
             } catch (error) {
                 console.error('Erro ao carregar resultados:', error);
@@ -883,43 +899,50 @@
         };
 
 
-        // Load initial data - simplified, no localStorage cache
+        // Load initial data from Vercel Blob Storage
         async function loadInitialData() {
             try {
-                showDataStatus('Carregando dados...');
+                showDataStatus('Carregando dados do Blob Storage...');
 
-                // Always load from server/API when online
                 if (isOnline) {
-                    showDataStatus('Carregando do servidor...');
-
                     try {
-                        // Load ALL results from server
-                        const response = await fetch('/api/results?limit=1000&offset=0&includeSearches=true');
-                        if (response.ok) {
-                            const serverData = await response.json();
-                            if (serverData.success && serverData.results.length > 0) {
-                                // Show ALL companies
-                                const allCompanies = serverData.results;
+                        // Load companies directly from Blob Storage
+                        const companiesResponse = await fetch('https://prospect-blob.public.blob.vercel-storage.com/companies.json');
+                        if (companiesResponse.ok) {
+                            const companiesData = await companiesResponse.json();
+                            const allCompanies = Object.values(companiesData || {});
 
-                                console.log(`Carregadas ${allCompanies.length} empresas do servidor`);
+                            if (allCompanies.length > 0) {
+                                console.log(`Carregadas ${allCompanies.length} empresas do Blob Storage`);
                                 addResults(allCompanies, false);
                                 elements.resultsTotal.textContent = allCompanies.length;
                                 elements.resultsShown.textContent = allCompanies.length;
 
-                                // Load searches
-                                if (serverData.previousSearches) {
-                                    loadPreviousSearches(serverData.previousSearches);
-                                }
-
                                 showDataStatus(`${allCompanies.length} empresas carregadas`, 'success');
-                                return;
+                            } else {
+                                showDataStatus('Nenhuma empresa encontrada', 'warning');
                             }
+                        } else {
+                            console.log('Erro ao carregar companies.json do Blob Storage');
+                            showDataStatus('Erro ao carregar dados', 'error');
                         }
-                        console.log('Nenhum dado no servidor');
-                        showDataStatus('Nenhum dado encontrado no servidor', 'warning');
-                    } catch (serverError) {
-                        console.error('Erro no servidor:', serverError);
-                        showDataStatus('Erro ao carregar dados do servidor', 'error');
+
+                        // Load searches from Blob Storage (if available)
+                        try {
+                            const searchesResponse = await fetch('https://prospect-blob.public.blob.vercel-storage.com/searches.json');
+                            if (searchesResponse.ok) {
+                                const searchesData = await searchesResponse.json();
+                                if (searchesData && searchesData.length > 0) {
+                                    loadPreviousSearches(searchesData);
+                                }
+                            }
+                        } catch (searchError) {
+                            console.log('Buscas anteriores não disponíveis no Blob Storage');
+                        }
+
+                    } catch (blobError) {
+                        console.error('Erro no Blob Storage:', blobError);
+                        showDataStatus('Erro ao carregar dados do Blob Storage', 'error');
                     }
                 } else {
                     console.log('Modo offline');
@@ -970,148 +993,112 @@
 
         async function loadStats() {
             try {
-                // Use API results with minimal data to get stats
-                const response = await fetch('/api/results?limit=1&offset=0');
-                const data = await response.json();
+                // Load stats directly from Blob Storage
+                const statsResponse = await fetch('https://prospect-blob.public.blob.vercel-storage.com/stats.json');
+                if (statsResponse.ok) {
+                    const statsData = await statsResponse.json();
 
-                if (data.success && data.stats) {
-                    // Basic stats - verificar se elementos existem antes de usar
+                    // Basic stats
                     const statCompaniesEl = document.getElementById('stat-companies');
                     const statSearchesEl = document.getElementById('stat-searches');
                     const statAverageEl = document.getElementById('stat-average');
                     const statSuccessRateEl = document.getElementById('stat-success-rate');
 
-                    if (statCompaniesEl) statCompaniesEl.textContent = data.stats.general.uniqueCompanies;
-                    if (statSearchesEl) statSearchesEl.textContent = data.stats.general.totalSearches;
-                    if (statAverageEl) statAverageEl.textContent = data.stats.general.averagePerSearch;
-                    if (statSuccessRateEl) statSuccessRateEl.textContent = data.stats.learning.successRate;
+                    if (statCompaniesEl) statCompaniesEl.textContent = statsData.totalResults || 0;
+                    if (statSearchesEl) statSearchesEl.textContent = statsData.totalSearches || 0;
+                    if (statAverageEl) statAverageEl.textContent = statsData.totalSearches > 0 ?
+                        (statsData.totalResults / statsData.totalSearches).toFixed(1) : 0;
+                    if (statSuccessRateEl) statSuccessRateEl.textContent = 'N/A';
 
-                    // Learning stats
-                    const learningSearchesEl = document.getElementById('learning-searches');
-                    const learningSuccessesEl = document.getElementById('learning-successes');
-                    const learningFailuresEl = document.getElementById('learning-failures');
+                    // Learning stats (load from learning.json)
+                    try {
+                        const learningResponse = await fetch('https://prospect-blob.public.blob.vercel-storage.com/learning.json');
+                        if (learningResponse.ok) {
+                            const learningData = await learningResponse.json();
 
-                    if (learningSearchesEl) learningSearchesEl.textContent = data.stats.learning.totalLearningSearches;
-                    if (learningSuccessesEl) learningSuccessesEl.textContent = data.stats.learning.successfulSearches;
-                    if (learningFailuresEl) learningFailuresEl.textContent = data.stats.learning.failedSearches;
+                            const learningSearchesEl = document.getElementById('learning-searches');
+                            const learningSuccessesEl = document.getElementById('learning-successes');
+                            const learningFailuresEl = document.getElementById('learning-failures');
 
-                    // Analytics data
-                    if (data.stats.analytics) {
-                        updateAnalyticsDashboard(data.stats.analytics);
+                            if (learningSearchesEl) learningSearchesEl.textContent = learningData.totalSearches || 0;
+                            if (learningSuccessesEl) learningSuccessesEl.textContent = learningData.successfulSearches?.length || 0;
+                            if (learningFailuresEl) learningFailuresEl.textContent = learningData.failedSearches?.length || 0;
+                        }
+                    } catch (learningError) {
+                        console.log('Dados de aprendizado não disponíveis');
                     }
 
-                    // Top bairros do aprendizado
-                    if (data.stats.learning.topNeighborhoods && elements.topLearningNeighborhoods) {
-                        const neighborhoodsHtml = data.stats.learning.topNeighborhoods.map(n =>
-                            `<span class="bg-indigo-100 text-indigo-800 px-2 py-1 rounded text-xs">${n.name} (${n.score})</span>`
-                        ).join(' ');
-                        elements.topLearningNeighborhoods.innerHTML = neighborhoodsHtml || '<span class="text-gray-500 text-xs">Nenhum dado ainda</span>';
-                    }
+                    // Update heatmap with neighborhood data
+                    updateNeighborhoodHeatmap(statsData);
                 }
             } catch (error) {
                 console.error('Erro ao carregar stats:', error);
             }
         }
 
-        function updateAnalyticsDashboard(analytics) {
-            // Performance metrics
-            const searchTimeEl = document.getElementById('avg-search-time');
-            const aiAnalysesEl = document.getElementById('ai-analyses-count');
-            const cacheHitEl = document.getElementById('cache-hit-rate');
-
-            if (analytics.performance) {
-                if (analytics.performance.search_duration) {
-                    searchTimeEl.textContent = (analytics.performance.search_duration.avg / 1000).toFixed(1);
-                }
-                if (analytics.performance.ai_analysis_duration) {
-                    aiAnalysesEl.textContent = analytics.performance.ai_analysis_duration.count || 0;
-                }
-            }
-
-            // User activity
-            if (analytics.userActivity) {
-                // Calculate cache hit rate from user actions
-                const cacheHits = analytics.userActivity.topActions?.ai_analysis_cache_hit || 0;
-                const totalAnalyses = (analytics.userActivity.topActions?.ai_analysis_requested || 0) +
-                                    (analytics.userActivity.topActions?.deep_analysis_requested || 0);
-                const hitRate = totalAnalyses > 0 ? ((cacheHits / totalAnalyses) * 100).toFixed(0) : 0;
-                cacheHitEl.textContent = hitRate + '%';
-            }
-
-            // Update heatmap
-            updateNeighborhoodHeatmap(analytics);
-        }
 
 
-        function updateNeighborhoodHeatmap(analytics) {
+        function updateNeighborhoodHeatmap(statsData) {
             const container = document.getElementById('neighborhood-heatmap');
             if (!container) return;
 
-            // Get companies by neighborhood from the current data (no separate API call needed)
-            // This function is called from updateAnalyticsDashboard with analytics data
-            // For now, we'll get the data from a lightweight API call to results
-            fetch('/api/results?limit=1&offset=0')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success && data.stats) {
-                        // Get companies by neighborhood (where companies were actually found)
-                        const neighborhoodStats = data.stats.general.companiesByNeighborhood || {};
+            try {
+                // Get neighborhood stats from stats data
+                const neighborhoodStats = statsData.neighborhoods || {};
 
-                        // Convert to array and sort by hits (descending)
-                        const neighborhoods = Object.entries(neighborhoodStats)
-                            .map(([name, hits]) => ({ name, score: hits }))
-                            .sort((a, b) => b.score - a.score);
+                // Convert to array and sort by hits (descending)
+                const neighborhoods = Object.entries(neighborhoodStats)
+                    .map(([name, hits]) => ({ name, score: hits }))
+                    .sort((a, b) => b.score - a.score);
 
-                        if (neighborhoods.length > 0) {
-                            // Calculate intensity based on score
-                            const maxScore = Math.max(...neighborhoods.map(n => n.score));
+                if (neighborhoods.length > 0) {
+                    // Calculate intensity based on score
+                    const maxScore = Math.max(...neighborhoods.map(n => n.score));
 
-                            container.innerHTML = neighborhoods.map(neighborhood => {
-                                const intensity = Math.round((neighborhood.score / maxScore) * 100);
+                    container.innerHTML = neighborhoods.slice(0, 9).map(neighborhood => {
+                        const intensity = Math.round((neighborhood.score / maxScore) * 100);
 
-                                // Color based on intensity
-                                let bgColor, textColor;
-                                if (intensity >= 80) {
-                                    bgColor = 'bg-red-500';
-                                    textColor = 'text-white';
-                                } else if (intensity >= 60) {
-                                    bgColor = 'bg-orange-500';
-                                    textColor = 'text-white';
-                                } else if (intensity >= 40) {
-                                    bgColor = 'bg-yellow-500';
-                                    textColor = 'text-black';
-                                } else {
-                                    bgColor = 'bg-green-500';
-                                    textColor = 'text-white';
-                                }
-
-                                return `
-                                    <div class="${bgColor} ${textColor} rounded-lg p-3 text-center">
-                                        <div class="font-semibold text-sm">${neighborhood.name}</div>
-                                        <div class="text-xs opacity-90">${neighborhood.score} empresas</div>
-                                        <div class="text-xs opacity-75">${intensity}%</div>
-                                    </div>
-                                `;
-                            }).join('');
+                        // Color based on intensity
+                        let bgColor, textColor;
+                        if (intensity >= 80) {
+                            bgColor = 'bg-red-500';
+                            textColor = 'text-white';
+                        } else if (intensity >= 60) {
+                            bgColor = 'bg-orange-500';
+                            textColor = 'text-white';
+                        } else if (intensity >= 40) {
+                            bgColor = 'bg-yellow-500';
+                            textColor = 'text-black';
                         } else {
-                            container.innerHTML = `
-                                <div class="col-span-full text-center text-gray-500 py-4">
-                                    <i class="fas fa-map-marked-alt text-2xl mb-2"></i>
-                                    <p>Nenhum bairro pesquisado ainda</p>
-                                </div>
-                            `;
+                            bgColor = 'bg-green-500';
+                            textColor = 'text-white';
                         }
-                    }
-                })
-                .catch(error => {
-                    console.error('Erro carregando mapa de calor:', error);
+
+                        return `
+                            <div class="${bgColor} ${textColor} rounded-lg p-3 text-center">
+                                <div class="font-semibold text-sm">${neighborhood.name}</div>
+                                <div class="text-xs opacity-90">${neighborhood.score} hits</div>
+                                <div class="text-xs opacity-75">${intensity}%</div>
+                            </div>
+                        `;
+                    }).join('');
+                } else {
                     container.innerHTML = `
                         <div class="col-span-full text-center text-gray-500 py-4">
-                            <i class="fas fa-exclamation-triangle text-2xl mb-2"></i>
-                            <p>Erro ao carregar mapa de calor</p>
+                            <i class="fas fa-map-marked-alt text-2xl mb-2"></i>
+                            <p>Nenhum bairro pesquisado ainda</p>
                         </div>
                     `;
-                });
+                }
+            } catch (error) {
+                console.error('Erro carregando mapa de calor:', error);
+                container.innerHTML = `
+                    <div class="col-span-full text-center text-gray-500 py-4">
+                        <i class="fas fa-exclamation-triangle text-2xl mb-2"></i>
+                        <p>Erro ao carregar mapa de calor</p>
+                    </div>
+                `;
+            }
         }
 
         // Load initial data
