@@ -20,6 +20,9 @@
                     <span id="status-badge" class="px-3 py-1 bg-gray-200 text-gray-700 rounded-full text-sm">
                         <i class="fas fa-pause"></i> Parado
                     </span>
+                    <button id="refresh-btn" class="ml-2 px-3 py-1 bg-blue-500 text-white rounded-full text-sm hover:bg-blue-600 transition-colors" title="Atualizar dados">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
                 </div>
             </div>
         </div>
@@ -362,7 +365,8 @@
             applyFilters: document.getElementById('apply-filters'),
             clearFilters: document.getElementById('clear-filters'),
             dataStatus: document.getElementById('data-status'),
-            syncBtn: document.getElementById('sync-btn')
+            syncBtn: document.getElementById('sync-btn'),
+            refreshBtn: document.getElementById('refresh-btn')
         };
 
         // Load saved filters and settings
@@ -377,6 +381,7 @@
         elements.applyFilters.addEventListener('click', applyFilters);
         elements.clearFilters.addEventListener('click', clearFilters);
         elements.syncBtn.addEventListener('click', showSyncOptions);
+        elements.refreshBtn.addEventListener('click', manualRefresh);
 
         async function startProspecting() {
             if (isRunning) return;
@@ -1322,13 +1327,35 @@
         loadInitialData();
         loadStats();
 
-        // Auto-refresh data every 5 minutes (reduced frequency to avoid overload)
-        setInterval(() => {
-            if (isOnline) {
-                console.log('Auto-refresh: updating data...');
-                loadStats(); // Only update stats, not full results to reduce load
+        // Manual refresh function
+        async function manualRefresh() {
+            if (!isOnline) {
+                showDataStatus('Sem conexão com internet', 'warning');
+                return;
             }
-        }, 300000); // 5 minutes instead of 30 seconds
+
+            const btn = elements.refreshBtn;
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            btn.disabled = true;
+
+            try {
+                console.log('Manual refresh: updating data...');
+                showDataStatus('Atualizando dados...', 'info');
+
+                // Update both stats and results
+                await loadStats();
+                await loadResults();
+
+                showDataStatus('Dados atualizados com sucesso', 'success');
+            } catch (error) {
+                console.error('Erro no refresh manual:', error);
+                showDataStatus('Erro ao atualizar dados', 'error');
+            } finally {
+                btn.innerHTML = originalHTML;
+                btn.disabled = false;
+            }
+        }
 
         // Auto-refresh is now optimized to run every 5 minutes instead of 30 seconds
 
