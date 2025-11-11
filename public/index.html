@@ -1182,38 +1182,39 @@
 
         async function loadStats() {
             try {
-                const response = await fetch('/api/stats');
+                // Use API results with minimal data to get stats
+                const response = await fetch('/api/results?limit=1&offset=0');
                 const data = await response.json();
 
-                if (data.success) {
+                if (data.success && data.stats) {
                     // Basic stats - verificar se elementos existem antes de usar
                     const statCompaniesEl = document.getElementById('stat-companies');
                     const statSearchesEl = document.getElementById('stat-searches');
                     const statAverageEl = document.getElementById('stat-average');
                     const statSuccessRateEl = document.getElementById('stat-success-rate');
 
-                    if (statCompaniesEl) statCompaniesEl.textContent = data.general.uniqueCompanies;
-                    if (statSearchesEl) statSearchesEl.textContent = data.general.totalSearches;
-                    if (statAverageEl) statAverageEl.textContent = data.general.averagePerSearch;
-                    if (statSuccessRateEl) statSuccessRateEl.textContent = data.learning.successRate;
+                    if (statCompaniesEl) statCompaniesEl.textContent = data.stats.general.uniqueCompanies;
+                    if (statSearchesEl) statSearchesEl.textContent = data.stats.general.totalSearches;
+                    if (statAverageEl) statAverageEl.textContent = data.stats.general.averagePerSearch;
+                    if (statSuccessRateEl) statSuccessRateEl.textContent = data.stats.learning.successRate;
 
                     // Learning stats
                     const learningSearchesEl = document.getElementById('learning-searches');
                     const learningSuccessesEl = document.getElementById('learning-successes');
                     const learningFailuresEl = document.getElementById('learning-failures');
 
-                    if (learningSearchesEl) learningSearchesEl.textContent = data.learning.totalLearningSearches;
-                    if (learningSuccessesEl) learningSuccessesEl.textContent = data.learning.successfulSearches;
-                    if (learningFailuresEl) learningFailuresEl.textContent = data.learning.failedSearches;
+                    if (learningSearchesEl) learningSearchesEl.textContent = data.stats.learning.totalLearningSearches;
+                    if (learningSuccessesEl) learningSuccessesEl.textContent = data.stats.learning.successfulSearches;
+                    if (learningFailuresEl) learningFailuresEl.textContent = data.stats.learning.failedSearches;
 
                     // Analytics data
-                    if (data.analytics) {
-                        updateAnalyticsDashboard(data.analytics);
+                    if (data.stats.analytics) {
+                        updateAnalyticsDashboard(data.stats.analytics);
                     }
 
                     // Top bairros do aprendizado
-                    if (data.learning.topNeighborhoods && elements.topLearningNeighborhoods) {
-                        const neighborhoodsHtml = data.learning.topNeighborhoods.map(n =>
+                    if (data.stats.learning.topNeighborhoods && elements.topLearningNeighborhoods) {
+                        const neighborhoodsHtml = data.stats.learning.topNeighborhoods.map(n =>
                             `<span class="bg-indigo-100 text-indigo-800 px-2 py-1 rounded text-xs">${n.name} (${n.score})</span>`
                         ).join(' ');
                         elements.topLearningNeighborhoods.innerHTML = neighborhoodsHtml || '<span class="text-gray-500 text-xs">Nenhum dado ainda</span>';
@@ -1258,13 +1259,15 @@
             const container = document.getElementById('neighborhood-heatmap');
             if (!container) return;
 
-            // Get all neighborhood stats from the API
-            fetch('/api/stats')
+            // Get companies by neighborhood from the current data (no separate API call needed)
+            // This function is called from updateAnalyticsDashboard with analytics data
+            // For now, we'll get the data from a lightweight API call to results
+            fetch('/api/results?limit=1&offset=0')
                 .then(response => response.json())
                 .then(data => {
-                    if (data.success) {
+                    if (data.success && data.stats) {
                         // Get companies by neighborhood (where companies were actually found)
-                        const neighborhoodStats = data.general.companiesByNeighborhood || {};
+                        const neighborhoodStats = data.stats.general.companiesByNeighborhood || {};
 
                         // Convert to array and sort by hits (descending)
                         const neighborhoods = Object.entries(neighborhoodStats)
@@ -1368,7 +1371,7 @@
                     console.log('Data changes detected, updating dashboard...');
                     showDataStatus('Novos dados disponíveis - atualizando...', 'info');
 
-                    // Update data
+                    // Update all data from single API call
                     await loadStats();
                     await loadResults();
 
