@@ -227,9 +227,6 @@
                     <button id="filter-btn" class="bg-gray-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-600 transition-colors">
                         <i class="fas fa-filter mr-1"></i>Filtros
                     </button>
-                    <button id="sync-btn" class="bg-purple-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-purple-600 transition-colors">
-                        <i class="fas fa-cloud mr-1"></i>Sincronizar
-                    </button>
                     <button id="load-more-btn" class="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-600 transition-colors">
                         <i class="fas fa-plus mr-1"></i>Carregar Mais
                     </button>
@@ -365,12 +362,8 @@
             applyFilters: document.getElementById('apply-filters'),
             clearFilters: document.getElementById('clear-filters'),
             dataStatus: document.getElementById('data-status'),
-            syncBtn: document.getElementById('sync-btn'),
             refreshBtn: document.getElementById('refresh-btn')
         };
-
-        // Load saved filters and settings
-        loadSavedSettings();
 
         // Start prospecting
         elements.startBtn.addEventListener('click', startProspecting);
@@ -380,7 +373,6 @@
         elements.filterBtn.addEventListener('click', toggleFilters);
         elements.applyFilters.addEventListener('click', applyFilters);
         elements.clearFilters.addEventListener('click', clearFilters);
-        elements.syncBtn.addEventListener('click', showSyncOptions);
         elements.refreshBtn.addEventListener('click', manualRefresh);
 
         async function startProspecting() {
@@ -390,8 +382,6 @@
             currentSearchIndex = 0;
             maxSearches = parseInt(elements.maxSearchesInput.value);
 
-            // Save settings when starting
-            saveSettings();
 
             elements.startBtn.disabled = true;
             elements.stopBtn.disabled = false;
@@ -472,8 +462,6 @@
                             addStatusMessage(`${data.resultsFound} resultados encontrados, mas nenhum aprovado pela IA`);
                         }
 
-                        // Update local cache after successful search (with all results)
-                        updateLocalCache();
                     }
 
                     currentSearchIndex++;
@@ -822,7 +810,6 @@
             currentFilters.dateRange = elements.filterDate.value;
             currentFilters.sortBy = elements.sortBy.value;
 
-            saveSettings(); // Save filters
 
             currentOffset = 0; // Reset pagination
             loadResults(false, true); // Reload with filters
@@ -847,294 +834,100 @@
             toggleFilters();
         }
 
-        function handleOnline() {
-            isOnline = true;
-            console.log('Conexão restaurada');
-            addStatusMessage('Conexão com internet restaurada - sincronizando dados...');
-            showDataStatus('Conexão restaurada - sincronizando...');
 
-            // Reload and sync data when back online
-            loadResults();
-            loadStats();
-            syncDataWithServer();
-        }
-
-        function handleOffline() {
-            isOnline = false;
-            console.log('Sem conexão com internet');
-            addStatusMessage('Modo offline ativado - algumas funcionalidades podem não funcionar');
-
-            // Load cached data
-            loadOfflineData();
-        }
-
-        async function loadOfflineData() {
-            try {
-                const cachedData = localStorage.getItem('prospectOfflineData');
-                if (cachedData) {
-                    offlineData = JSON.parse(cachedData);
-                    console.log('Dados offline carregados');
-
-                    // Show offline indicator
-                    if (!isOnline) {
-                        showOfflineMode();
-                    }
-                }
-            } catch (error) {
-                console.error('Erro ao carregar dados offline:', error);
-            }
-        }
-
-        function showOfflineMode() {
-            // Add offline indicator to header
-            const header = document.querySelector('nav');
-            if (header && !header.querySelector('.offline-indicator')) {
-                const offlineDiv = document.createElement('div');
-                offlineDiv.className = 'offline-indicator px-3 py-1 bg-orange-500 text-white rounded-full text-sm';
-                offlineDiv.innerHTML = '<i class="fas fa-wifi-slash mr-1"></i>Offline';
-                header.querySelector('.flex.items-center.justify-between').appendChild(offlineDiv);
-            }
-
-            // Disable online-only features
-            elements.startBtn.disabled = true;
-            elements.startBtn.title = 'Indisponível no modo offline';
-        }
-
-        function hideOfflineMode() {
-            // Remove offline indicator
-            const indicator = document.querySelector('.offline-indicator');
-            if (indicator) {
-                indicator.remove();
-            }
-
-            // Re-enable features
-            elements.startBtn.disabled = false;
-            elements.startBtn.title = '';
-        }
-
-        // Enhanced loadResults with offline support and AI filtering
-        const originalLoadResults = loadResults;
+        // Simplified loadResults - no offline support or localStorage
         loadResults = async function(append = false, applyCurrentFilters = false) {
-            if (!isOnline && offlineData) {
-                // Use offline data - filter only AI-approved companies
-                console.log('Usando dados offline');
-
-                let allResults = offlineData.results || [];
-                let filteredResults = allResults.filter(company =>
-                    company.aiValidation && company.aiValidation.isValid === true
-                );
-
-                // Apply current filters to offline data
-                if (applyCurrentFilters) {
-                    if (currentFilters.neighborhood) {
-                        filteredResults = filteredResults.filter(r => r.neighborhood === currentFilters.neighborhood);
-                    }
-                    if (currentFilters.businessType) {
-                        filteredResults = filteredResults.filter(r => r.businessType === currentFilters.businessType);
-                    }
-                }
-
-                // Apply sorting
-                switch (currentFilters.sortBy) {
-                    case 'name':
-                        filteredResults.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
-                        break;
-                    case 'neighborhood':
-                        filteredResults.sort((a, b) => (a.neighborhood || '').localeCompare(b.neighborhood || ''));
-                        break;
-                    case 'date':
-                    default:
-                        filteredResults.sort((a, b) => (b.foundAt || 0) - (a.foundAt || 0));
-                        break;
-                }
-
-                // Paginate
+            try {
                 const limit = append ? resultsPerPage : 50;
                 const offset = append ? currentOffset : 0;
-                const paginatedResults = filteredResults.slice(offset, offset + limit);
 
-                if (paginatedResults.length > 0) {
-                    addResults(paginatedResults, append);
-                } else if (!append) {
-                    elements.resultsContainer.innerHTML = '<p class="text-gray-500 text-center py-8">Nenhum resultado aprovado encontrado (modo offline)</p>';
+                // Build query parameters
+                let queryParams = `limit=${limit}&offset=${offset}&includeSearches=true`;
+
+                if (applyCurrentFilters) {
+                    if (currentFilters.neighborhood) queryParams += `&neighborhood=${encodeURIComponent(currentFilters.neighborhood)}`;
+                    if (currentFilters.businessType) queryParams += `&businessType=${encodeURIComponent(currentFilters.businessType)}`;
+                    if (currentFilters.dateRange) queryParams += `&dateRange=${encodeURIComponent(currentFilters.dateRange)}`;
+                    if (currentFilters.sortBy) queryParams += `&sortBy=${encodeURIComponent(currentFilters.sortBy)}`;
                 }
 
-                elements.resultsTotal.textContent = filteredResults.length;
-                elements.resultsShown.textContent = append ?
-                    Math.min(currentOffset + paginatedResults.length, filteredResults.length) :
-                    Math.min(paginatedResults.length, filteredResults.length);
+                const response = await fetch(`/api/results?${queryParams}`);
+                const data = await response.json();
 
-                return;
-            }
+                if (data.success) {
+                    if (!append) {
+                        elements.resultsContainer.innerHTML = '';
+                    }
 
-            // Online mode - call original function and cache results
-            try {
-                await originalLoadResults.call(this, append, applyCurrentFilters);
+                    if (data.results.length > 0) {
+                        addResults(data.results, append);
+                    } else if (!append) {
+                        elements.resultsContainer.innerHTML = '<p class="text-gray-500 text-center py-8">Nenhum resultado encontrado com os filtros aplicados</p>';
+                    }
 
-                // Cache successful responses for offline use
-                if (isOnline && !append) {
-                    const response = await fetch(`/api/results?limit=100&offset=0&includeSearches=true`);
-                    if (response.ok) {
-                        const data = await response.json();
-                        if (data.success) {
-                            localStorage.setItem('prospectOfflineData', JSON.stringify(data));
-                        }
+                    elements.resultsTotal.textContent = data.total;
+                    elements.resultsShown.textContent = append ?
+                        Math.min(currentOffset + data.results.length, data.total) :
+                        Math.min(data.results.length, data.total);
+
+                    elements.loadMoreBtn.style.display = data.pagination.hasMore ? 'block' : 'none';
+
+                    // Carregar buscas anteriores
+                    if (data.previousSearches) {
+                        loadPreviousSearches(data.previousSearches);
                     }
                 }
             } catch (error) {
-                console.error('Erro no modo online, tentando offline:', error);
-                if (offlineData) {
-                    return loadResults.call(this, append, applyCurrentFilters);
-                }
+                console.error('Erro ao carregar resultados:', error);
             }
         };
 
-        // Auto-sync local data to cloud if needed
-        async function autoSyncLocalToCloud() {
-            try {
-                // Check if we have local data that needs to be synced
-                const cachedData = localStorage.getItem('prospectDashboardData');
-                if (!cachedData) return false;
 
-                const localData = JSON.parse(cachedData);
-                if (!localData.results || localData.results.length === 0) return false;
-
-                // Check server data
-                const serverResponse = await fetch('/api/results?limit=1&offset=0');
-                if (!serverResponse.ok) return false;
-
-                const serverData = await serverResponse.json();
-                if (!serverData.success) return false;
-
-                // If server has much less data than local, sync local to cloud
-                const serverCount = serverData.total || 0;
-                const localCount = localData.results.length;
-
-                if (localCount > serverCount * 2) { // Local has at least 2x more data
-                    console.log(`🔄 Detectado desync: Local=${localCount}, Nuvem=${serverCount}. Sincronizando...`);
-
-                    showDataStatus('Sincronizando dados locais para nuvem...', 'info');
-
-                    const syncResponse = await fetch('/api/sync', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            action: 'merge_data',
-                            data: {
-                                companies: localData.results,
-                                stats: localData.stats || {},
-                                learning: localData.learning || {}
-                            }
-                        })
-                    });
-
-                    const syncResult = await syncResponse.json();
-                    if (syncResult.success) {
-                        console.log(`✅ Auto-sincronização concluída: ${syncResult.mergedCount} novos, ${syncResult.updatedCount} atualizados`);
-                        showDataStatus(`Sincronização automática concluída`, 'success');
-                        return true;
-                    }
-                }
-
-                return false;
-            } catch (error) {
-                console.error('Erro na auto-sincronização:', error);
-                return false;
-            }
-        }
-
-        // Load initial data with persistence
+        // Load initial data - simplified, no localStorage cache
         async function loadInitialData() {
             try {
                 showDataStatus('Carregando dados...');
 
-                // Always try to load from server first when online
+                // Always load from server/API when online
                 if (isOnline) {
-                    showDataStatus('Sincronizando com servidor...');
+                    showDataStatus('Carregando do servidor...');
 
                     try {
-                        // Try auto-sync first
-                        const wasAutoSynced = await autoSyncLocalToCloud();
-
-                        // Load ALL results from server (not just first page)
+                        // Load ALL results from server
                         const response = await fetch('/api/results?limit=1000&offset=0&includeSearches=true');
                         if (response.ok) {
                             const serverData = await response.json();
                             if (serverData.success && serverData.results.length > 0) {
-                                // Show ALL companies (no AI filtering for now)
+                                // Show ALL companies
                                 const allCompanies = serverData.results;
 
-                                if (allCompanies.length > 0) {
-                                    console.log(`Carregadas ${allCompanies.length} empresas do servidor`);
-                                    addResults(allCompanies, false);
-                                    elements.resultsTotal.textContent = allCompanies.length;
-                                    elements.resultsShown.textContent = allCompanies.length;
+                                console.log(`Carregadas ${allCompanies.length} empresas do servidor`);
+                                addResults(allCompanies, false);
+                                elements.resultsTotal.textContent = allCompanies.length;
+                                elements.resultsShown.textContent = allCompanies.length;
 
-                                    // Load searches
-                                    if (serverData.previousSearches) {
-                                        loadPreviousSearches(serverData.previousSearches);
-                                    }
-
-                                    // Update local cache with server data
-                                    localStorage.setItem('prospectDashboardData', JSON.stringify({
-                                        results: serverData.results,
-                                        total: serverData.total,
-                                        previousSearches: serverData.previousSearches,
-                                        lastSync: Date.now()
-                                    }));
-
-                                    const syncMessage = wasAutoSynced ?
-                                        `${allCompanies.length} empresas sincronizadas (auto-sync executado)` :
-                                        `${allCompanies.length} empresas sincronizadas`;
-
-                                    showDataStatus(syncMessage, 'success');
-                                    return; // Exit early, no need to load from cache
+                                // Load searches
+                                if (serverData.previousSearches) {
+                                    loadPreviousSearches(serverData.previousSearches);
                                 }
+
+                                showDataStatus(`${allCompanies.length} empresas carregadas`, 'success');
+                                return;
                             }
                         }
-                        console.log('Erro ao carregar do servidor, tentando cache local...');
+                        console.log('Nenhum dado no servidor');
+                        showDataStatus('Nenhum dado encontrado no servidor', 'warning');
                     } catch (serverError) {
                         console.error('Erro no servidor:', serverError);
-                    }
-                }
-
-                // Fallback to localStorage if server fails or offline
-                const cachedData = localStorage.getItem('prospectDashboardData');
-                if (cachedData) {
-                    const localData = JSON.parse(cachedData);
-                    if (localData.results && localData.results.length > 0) {
-                        // Show ALL companies from cache (no AI filtering)
-                        const allCompanies = localData.results;
-
-                        if (allCompanies.length > 0) {
-                            console.log(`Carregando ${allCompanies.length} empresas do cache local...`);
-                            addResults(allCompanies, false);
-                            elements.resultsTotal.textContent = allCompanies.length;
-                            elements.resultsShown.textContent = allCompanies.length;
-
-                            // Load searches if available
-                            if (localData.previousSearches) {
-                                loadPreviousSearches(localData.previousSearches);
-                            }
-
-                            const statusMsg = isOnline ? 'Dados locais carregados (servidor indisponível)' : 'Dados locais carregados (modo offline)';
-                            showDataStatus(statusMsg, 'warning');
-                        } else {
-                            console.log('Nenhuma empresa encontrada no cache local');
-                            showDataStatus('Nenhum dado encontrado', 'warning');
-                        }
-                    } else {
-                        showDataStatus('Nenhum dado em cache', 'warning');
+                        showDataStatus('Erro ao carregar dados do servidor', 'error');
                     }
                 } else {
-                    const statusMsg = isOnline ? 'Nenhum dado encontrado' : 'Modo offline - nenhum dado em cache';
-                    showDataStatus(statusMsg, 'warning');
+                    console.log('Modo offline');
+                    showDataStatus('Modo offline - conecte-se à internet', 'warning');
                 }
             } catch (error) {
                 console.error('Erro ao carregar dados iniciais:', error);
                 showDataStatus('Erro ao carregar dados', 'error');
-                // Fallback to basic load
-                loadResults();
             }
         }
 
@@ -1426,303 +1219,17 @@
 
         // Auto-refresh is now optimized to run every 5 minutes instead of 30 seconds
 
-        // Offline support
-        window.addEventListener('online', handleOnline);
-        window.addEventListener('offline', handleOffline);
+        // Basic online/offline detection
+        window.addEventListener('online', () => {
+            console.log('Conexão restaurada');
+            loadResults();
+            loadStats();
+        });
 
-        // Load offline data if exists
-        loadOfflineData();
+        window.addEventListener('offline', () => {
+            console.log('Sem conexão com internet');
+        });
 
-        // Load and save settings functions
-        function loadSavedSettings() {
-            try {
-                const savedSettings = localStorage.getItem('prospectSettings');
-                if (savedSettings) {
-                    const settings = JSON.parse(savedSettings);
-                    currentFilters = settings.filters || currentFilters;
-
-                    // Apply saved filter values to UI
-                    elements.filterNeighborhood.value = currentFilters.neighborhood || '';
-                    elements.filterBusiness.value = currentFilters.businessType || '';
-                    elements.filterDate.value = currentFilters.dateRange || '';
-                    elements.sortBy.value = currentFilters.sortBy || 'date';
-                    elements.maxSearchesInput.value = settings.maxSearches || 10;
-
-                    console.log('Configurações salvas carregadas');
-                }
-            } catch (error) {
-                console.error('Erro ao carregar configurações:', error);
-            }
-        }
-
-        function saveSettings() {
-            try {
-                const settings = {
-                    filters: currentFilters,
-                    maxSearches: parseInt(elements.maxSearchesInput.value) || 10,
-                    lastSaved: Date.now()
-                };
-                localStorage.setItem('prospectSettings', JSON.stringify(settings));
-            } catch (error) {
-                console.error('Erro ao salvar configurações:', error);
-            }
-        }
-
-        // Function to update local cache
-        function updateLocalCache() {
-            if (isOnline) {
-                // Get current data from server and cache locally
-                fetch('/api/results?limit=500&offset=0&includeSearches=true')
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            localStorage.setItem('prospectDashboardData', JSON.stringify({
-                                results: data.results,
-                                total: data.total,
-                                previousSearches: data.previousSearches,
-                                lastSync: Date.now()
-                            }));
-                            console.log('Cache local atualizado após busca');
-
-                            // Update display with only approved companies
-                            const approvedCompanies = data.results.filter(company =>
-                                company.aiValidation && company.aiValidation.isValid === true
-                            );
-
-                            if (approvedCompanies.length > 0) {
-                                // Clear current results and show updated approved ones
-                                elements.resultsContainer.innerHTML = '';
-                                addResults(approvedCompanies, false);
-                                elements.resultsTotal.textContent = approvedCompanies.length;
-                                elements.resultsShown.textContent = approvedCompanies.length;
-                                showDataStatus(`${approvedCompanies.length} empresas aprovadas atualizadas`, 'success');
-                            }
-                        }
-                    })
-                    .catch(error => console.error('Erro ao atualizar cache:', error));
-            }
-        }
-
-        // Sync data with server
-        function syncDataWithServer() {
-            if (!isOnline) return;
-
-            try {
-                // Get latest data from server
-                fetch('/api/results?limit=100&offset=0&includeSearches=true')
-                    .then(response => response.json())
-                    .then(serverData => {
-                        if (serverData.success) {
-                            // Check if we have newer data locally
-                            const localData = localStorage.getItem('prospectDashboardData');
-                            let shouldUpdateLocal = true;
-
-                            if (localData) {
-                                const parsedLocal = JSON.parse(localData);
-                                // If server has more results, update local
-                                if (serverData.total > (parsedLocal.total || 0)) {
-                                    shouldUpdateLocal = true;
-                                }
-                            }
-
-                            if (shouldUpdateLocal) {
-                                localStorage.setItem('prospectDashboardData', JSON.stringify({
-                                    results: serverData.results,
-                                    total: serverData.total,
-                                    previousSearches: serverData.previousSearches,
-                                    lastSync: Date.now()
-                                }));
-                                console.log('Dados sincronizados com servidor');
-
-                                // Update display with only approved companies
-                                const approvedCompanies = serverData.results.filter(company =>
-                                    company.aiValidation && company.aiValidation.isValid === true
-                                );
-
-                                if (approvedCompanies.length > 0) {
-                                    // Clear and reload with approved companies only
-                                    elements.resultsContainer.innerHTML = '';
-                                    addResults(approvedCompanies, false);
-                                    elements.resultsTotal.textContent = approvedCompanies.length;
-                                    elements.resultsShown.textContent = approvedCompanies.length;
-                                    showDataStatus(`${approvedCompanies.length} empresas aprovadas sincronizadas`, 'success');
-                                }
-                            }
-                        }
-                    })
-                    .catch(error => console.error('Erro na sincronização:', error));
-            } catch (error) {
-                console.error('Erro na sincronização de dados:', error);
-            }
-        }
-
-        // Show sync options modal
-        function showSyncOptions() {
-            const modal = document.createElement('div');
-            modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
-            modal.innerHTML = `
-                <div class="bg-white rounded-2xl max-w-md w-full mx-4">
-                    <div class="p-6">
-                        <div class="flex justify-between items-center mb-4">
-                            <h2 class="text-2xl font-bold text-gray-800">
-                                <i class="fas fa-cloud text-purple-600 mr-2"></i>
-                                Sincronização
-                            </h2>
-                            <button onclick="this.closest('.fixed').remove()" class="text-gray-500 hover:text-gray-700">
-                                <i class="fas fa-times text-xl"></i>
-                            </button>
-                        </div>
-
-                        <div class="space-y-3">
-                            <button onclick="syncToCloud()" class="w-full bg-blue-500 text-white px-4 py-3 rounded-lg hover:bg-blue-600 transition-colors">
-                                <i class="fas fa-upload mr-2"></i>Enviar dados locais para nuvem
-                            </button>
-
-                            <button onclick="syncFromCloud()" class="w-full bg-green-500 text-white px-4 py-3 rounded-lg hover:bg-green-600 transition-colors">
-                                <i class="fas fa-download mr-2"></i>Baixar dados da nuvem
-                            </button>
-
-                            <button onclick="mergeData()" class="w-full bg-purple-500 text-white px-4 py-3 rounded-lg hover:bg-purple-600 transition-colors">
-                                <i class="fas fa-exchange-alt mr-2"></i>Mesclar dados locais e nuvem
-                            </button>
-                        </div>
-
-                        <div class="mt-4 text-sm text-gray-600">
-                            <p><strong>Enviar:</strong> Sincroniza dados locais para a nuvem</p>
-                            <p><strong>Baixar:</strong> Substitui dados locais pelos da nuvem</p>
-                            <p><strong>Mesclar:</strong> Combina dados locais e da nuvem</p>
-                        </div>
-                    </div>
-                </div>
-            `;
-
-            document.body.appendChild(modal);
-        }
-
-        // Sync local data to cloud
-        async function syncToCloud() {
-            try {
-                const localData = localStorage.getItem('prospectDashboardData');
-                if (!localData) {
-                    alert('Nenhum dado local encontrado para sincronizar');
-                    return;
-                }
-
-                const data = JSON.parse(localData);
-                showDataStatus('Enviando dados para nuvem...', 'info');
-
-                const response = await fetch('/api/sync', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        action: 'sync_to_cloud',
-                        data: data
-                    })
-                });
-
-                const result = await response.json();
-
-                if (result.success) {
-                    showDataStatus(result.message, 'success');
-                    // Refresh data after sync
-                    loadResults();
-                    loadStats();
-                } else {
-                    showDataStatus('Erro: ' + result.error, 'error');
-                }
-            } catch (error) {
-                console.error('Erro na sincronização:', error);
-                showDataStatus('Erro na sincronização', 'error');
-            }
-
-            // Close modal
-            document.querySelector('.fixed')?.remove();
-        }
-
-        // Sync data from cloud to local
-        async function syncFromCloud() {
-            try {
-                showDataStatus('Baixando dados da nuvem...', 'info');
-
-                const response = await fetch('/api/sync', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        action: 'sync_from_cloud'
-                    })
-                });
-
-                const result = await response.json();
-
-                if (result.success) {
-                    // Save cloud data to localStorage
-                    localStorage.setItem('prospectDashboardData', JSON.stringify(result.data));
-
-                    // Update display with cloud data
-                    const approvedCompanies = result.data.companies.filter(company =>
-                        company.aiValidation && company.aiValidation.isValid === true
-                    );
-
-                    if (approvedCompanies.length > 0) {
-                        elements.resultsContainer.innerHTML = '';
-                        addResults(approvedCompanies, false);
-                        elements.resultsTotal.textContent = approvedCompanies.length;
-                        elements.resultsShown.textContent = approvedCompanies.length;
-                    }
-
-                    showDataStatus(result.message, 'success');
-                    loadStats(); // Update stats
-                } else {
-                    showDataStatus('Erro: ' + result.error, 'error');
-                }
-            } catch (error) {
-                console.error('Erro ao baixar dados:', error);
-                showDataStatus('Erro ao baixar dados', 'error');
-            }
-
-            // Close modal
-            document.querySelector('.fixed')?.remove();
-        }
-
-        // Merge local and cloud data
-        async function mergeData() {
-            try {
-                const localData = localStorage.getItem('prospectDashboardData');
-                if (!localData) {
-                    alert('Nenhum dado local encontrado para mesclar');
-                    return;
-                }
-
-                const data = JSON.parse(localData);
-                showDataStatus('Mesclando dados...', 'info');
-
-                const response = await fetch('/api/sync', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        action: 'merge_data',
-                        data: data
-                    })
-                });
-
-                const result = await response.json();
-
-                if (result.success) {
-                    showDataStatus(result.message, 'success');
-                    // Refresh data after merge
-                    loadResults();
-                    loadStats();
-                } else {
-                    showDataStatus('Erro: ' + result.error, 'error');
-                }
-            } catch (error) {
-                console.error('Erro na mesclagem:', error);
-                showDataStatus('Erro na mesclagem', 'error');
-            }
-
-            // Close modal
-            document.querySelector('.fixed')?.remove();
-        }
     </script>
 </body>
 </html>
