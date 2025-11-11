@@ -1,55 +1,98 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { put, head } from '@vercel/blob';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Use /tmp for Vercel serverless functions, but also check for local data directory
-const DATA_DIR = process.env.VERCEL ? '/tmp' : (fs.existsSync(path.join(__dirname, '..', 'data')) ? path.join(__dirname, '..', 'data') : '/tmp');
+// Detect if running on Vercel
+const IS_VERCEL = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
+
+// Use filesystem for local development, Blob Storage for Vercel
+const USE_BLOB_STORAGE = IS_VERCEL;
+
+// File paths/keys
+const COMPANIES_KEY = 'companies.json';
+const STATS_KEY = 'stats.json';
+const LEARNING_KEY = 'learning.json';
+const CACHE_KEY = 'cache.json';
+
+// Local file paths (for development)
+const DATA_DIR = path.join(__dirname, '..', 'data');
 const COMPANIES_FILE = path.join(DATA_DIR, 'companies.json');
 const STATS_FILE = path.join(DATA_DIR, 'stats.json');
 const LEARNING_FILE = path.join(DATA_DIR, 'learning.json');
 const CACHE_FILE = path.join(DATA_DIR, 'cache.json');
 
-// Ensure data directory exists (only create if not Vercel)
-if (!fs.existsSync(DATA_DIR) && !process.env.VERCEL) {
+// Ensure data directory exists for local development
+if (!USE_BLOB_STORAGE && !fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-// Initialize files if they don't exist
-if (!fs.existsSync(COMPANIES_FILE)) {
-  fs.writeFileSync(COMPANIES_FILE, JSON.stringify({}));
-}
+// Initialize local files if they don't exist (development only)
+if (!USE_BLOB_STORAGE) {
+  if (!fs.existsSync(COMPANIES_FILE)) {
+    fs.writeFileSync(COMPANIES_FILE, JSON.stringify({}));
+  }
 
-if (!fs.existsSync(STATS_FILE)) {
-  fs.writeFileSync(STATS_FILE, JSON.stringify({
-    totalSearches: 0,
-    totalResults: 0,
-    neighborhoods: {},
-    businesses: {}
-  }));
-}
-
-if (!fs.existsSync(LEARNING_FILE)) {
-   fs.writeFileSync(LEARNING_FILE, JSON.stringify({
-     successfulSearches: [],
-     failedSearches: [],
-     bestNeighborhoods: {},
-     bestBusinessTypes: {},
-     bestStrategies: {},
-     totalSearches: 0,
-     successRate: 0
-   }));
-}
-
-if (!fs.existsSync(CACHE_FILE)) {
-    fs.writeFileSync(CACHE_FILE, JSON.stringify({
-      searchResults: {},
-      companyAnalyses: {},
-      reports: {},
-      lastCleanup: Date.now()
+  if (!fs.existsSync(STATS_FILE)) {
+    fs.writeFileSync(STATS_FILE, JSON.stringify({
+      totalSearches: 0,
+      totalResults: 0,
+      neighborhoods: {},
+      businesses: {}
     }));
+  }
+
+  if (!fs.existsSync(LEARNING_FILE)) {
+     fs.writeFileSync(LEARNING_FILE, JSON.stringify({
+       successfulSearches: [],
+       failedSearches: [],
+       bestNeighborhoods: {},
+       bestBusinessTypes: {},
+       bestStrategies: {},
+       totalSearches: 0,
+       successRate: 0
+     }));
+  }
+
+  if (!fs.existsSync(CACHE_FILE)) {
+      fs.writeFileSync(CACHE_FILE, JSON.stringify({
+        searchResults: {},
+        companyAnalyses: {},
+        reports: {},
+        lastCleanup: Date.now()
+      }));
+  }
+}
+
+// Blob Storage helper functions
+async function readBlobData(key) {
+  try {
+    const blob = await head(key);
+    if (!blob) return null;
+    const response = await fetch(blob.url);
+    const text = await response.text();
+    return JSON.parse(text);
+  } catch (error) {
+    console.error(`Error reading blob ${key}:`, error);
+    return null;
+  }
+}
+
+async function writeBlobData(key, data) {
+  try {
+    const blob = await put(key, JSON.stringify(data, null, 2), {
+      access: 'public',
+      contentType: 'application/json'
+    });
+    console.log(`💾 Blob saved: ${key}`);
+    return true;
+  } catch (error) {
+    console.error(`Error writing blob ${key}:`, error);
+    return false;
+  }
 }
 
 
@@ -57,12 +100,17 @@ if (!fs.existsSync(CACHE_FILE)) {
 export const storage = {
 
   async getCompanies() {
-    try {
-      const data = fs.readFileSync(COMPANIES_FILE, 'utf8');
-      return JSON.parse(data);
-    } catch (error) {
-      console.error('Error reading companies:', error);
-      return {};
+    if (USE_BLOB_STORAGE) {
+      const data = await readBlobData(COMPANIES_KEY);
+      return data || {};
+    } else {
+      try {
+        const data = fs.readFileSync(COMPANIES_FILE, 'utf8');
+        return JSON.parse(data);
+      } catch (error) {
+        console.error('Error reading companies:', error);
+        return {};
+      }
     }
   },
 
@@ -70,7 +118,13 @@ export const storage = {
     try {
       const companies = await this.getCompanies();
       companies[key] = { ...data, savedAt: Date.now() };
-      fs.writeFileSync(COMPANIES_FILE, JSON.stringify(companies, null, 2));
+
+      if (USE_BLOB_STORAGE) {
+        await writeBlobData(COMPANIES_KEY, companies);
+      } else {
+        fs.writeFileSync(COMPANIES_FILE, JSON.stringify(companies, null, 2));
+      }
+
       console.log(`💾 Empresa salva: ${key} - ${data.title || 'Sem título'}`);
       return true;
     } catch (error) {
@@ -102,17 +156,27 @@ export const storage = {
 
   // Stats storage
   async getStats() {
-    try {
-      const data = fs.readFileSync(STATS_FILE, 'utf8');
-      return JSON.parse(data);
-    } catch (error) {
-      console.error('Error reading stats:', error);
-      return {
+    if (USE_BLOB_STORAGE) {
+      const data = await readBlobData(STATS_KEY);
+      return data || {
         totalSearches: 0,
         totalResults: 0,
         neighborhoods: {},
         businesses: {}
       };
+    } else {
+      try {
+        const data = fs.readFileSync(STATS_FILE, 'utf8');
+        return JSON.parse(data);
+      } catch (error) {
+        console.error('Error reading stats:', error);
+        return {
+          totalSearches: 0,
+          totalResults: 0,
+          neighborhoods: {},
+          businesses: {}
+        };
+      }
     }
   },
 
@@ -120,7 +184,13 @@ export const storage = {
     try {
       const stats = await this.getStats();
       Object.assign(stats, updates);
-      fs.writeFileSync(STATS_FILE, JSON.stringify(stats, null, 2));
+
+      if (USE_BLOB_STORAGE) {
+        await writeBlobData(STATS_KEY, stats);
+      } else {
+        fs.writeFileSync(STATS_FILE, JSON.stringify(stats, null, 2));
+      }
+
       return true;
     } catch (error) {
       console.error('Error updating stats:', error);
@@ -132,7 +202,13 @@ export const storage = {
     try {
       const stats = await this.getStats();
       stats[key] = (stats[key] || 0) + value;
-      fs.writeFileSync(STATS_FILE, JSON.stringify(stats, null, 2));
+
+      if (USE_BLOB_STORAGE) {
+        await writeBlobData(STATS_KEY, stats);
+      } else {
+        fs.writeFileSync(STATS_FILE, JSON.stringify(stats, null, 2));
+      }
+
       console.log(`📊 Estatística atualizada: ${key} = ${stats[key]}`);
       return true;
     } catch (error) {
@@ -145,7 +221,13 @@ export const storage = {
     try {
       const stats = await this.getStats();
       stats.neighborhoods[neighborhood] = (stats.neighborhoods[neighborhood] || 0) + hits;
-      fs.writeFileSync(STATS_FILE, JSON.stringify(stats, null, 2));
+
+      if (USE_BLOB_STORAGE) {
+        await writeBlobData(STATS_KEY, stats);
+      } else {
+        fs.writeFileSync(STATS_FILE, JSON.stringify(stats, null, 2));
+      }
+
       return true;
     } catch (error) {
       console.error('Error incrementing neighborhood hits:', error);
@@ -157,7 +239,13 @@ export const storage = {
     try {
       const stats = await this.getStats();
       stats.businesses[business] = (stats.businesses[business] || 0) + hits;
-      fs.writeFileSync(STATS_FILE, JSON.stringify(stats, null, 2));
+
+      if (USE_BLOB_STORAGE) {
+        await writeBlobData(STATS_KEY, stats);
+      } else {
+        fs.writeFileSync(STATS_FILE, JSON.stringify(stats, null, 2));
+      }
+
       return true;
     } catch (error) {
       console.error('Error incrementing business hits:', error);
@@ -167,12 +255,9 @@ export const storage = {
 
   // Learning data storage
   async getLearningData() {
-    try {
-      const data = fs.readFileSync(LEARNING_FILE, 'utf8');
-      return JSON.parse(data);
-    } catch (error) {
-      console.error('Error reading learning data:', error);
-      return {
+    if (USE_BLOB_STORAGE) {
+      const data = await readBlobData(LEARNING_KEY);
+      return data || {
         successfulSearches: [],
         failedSearches: [],
         bestNeighborhoods: {},
@@ -181,12 +266,32 @@ export const storage = {
         totalSearches: 0,
         successRate: 0
       };
+    } else {
+      try {
+        const data = fs.readFileSync(LEARNING_FILE, 'utf8');
+        return JSON.parse(data);
+      } catch (error) {
+        console.error('Error reading learning data:', error);
+        return {
+          successfulSearches: [],
+          failedSearches: [],
+          bestNeighborhoods: {},
+          bestBusinessTypes: {},
+          bestStrategies: {},
+          totalSearches: 0,
+          successRate: 0
+        };
+      }
     }
   },
 
   async saveLearningData(data) {
     try {
-      fs.writeFileSync(LEARNING_FILE, JSON.stringify(data, null, 2));
+      if (USE_BLOB_STORAGE) {
+        await writeBlobData(LEARNING_KEY, data);
+      } else {
+        fs.writeFileSync(LEARNING_FILE, JSON.stringify(data, null, 2));
+      }
       return true;
     } catch (error) {
       console.error('Error saving learning data:', error);
@@ -196,23 +301,37 @@ export const storage = {
 
   // ==================== CACHE SYSTEM ====================
   async getCache() {
-    try {
-      const data = fs.readFileSync(CACHE_FILE, 'utf8');
-      return JSON.parse(data);
-    } catch (error) {
-      console.error('Error reading cache:', error);
-      return {
+    if (USE_BLOB_STORAGE) {
+      const data = await readBlobData(CACHE_KEY);
+      return data || {
         searchResults: {},
         companyAnalyses: {},
         reports: {},
         lastCleanup: Date.now()
       };
+    } else {
+      try {
+        const data = fs.readFileSync(CACHE_FILE, 'utf8');
+        return JSON.parse(data);
+      } catch (error) {
+        console.error('Error reading cache:', error);
+        return {
+          searchResults: {},
+          companyAnalyses: {},
+          reports: {},
+          lastCleanup: Date.now()
+        };
+      }
     }
   },
 
   async saveCache(data) {
     try {
-      fs.writeFileSync(CACHE_FILE, JSON.stringify(data, null, 2));
+      if (USE_BLOB_STORAGE) {
+        await writeBlobData(CACHE_KEY, data);
+      } else {
+        fs.writeFileSync(CACHE_FILE, JSON.stringify(data, null, 2));
+      }
       return true;
     } catch (error) {
       console.error('Error saving cache:', error);
@@ -347,7 +466,13 @@ export const storage = {
      }
      stats.userActions[action].count++;
      stats.userActions[action].lastAction = { timestamp: Date.now(), data };
-     fs.writeFileSync(STATS_FILE, JSON.stringify(stats, null, 2));
+
+     if (USE_BLOB_STORAGE) {
+       await writeBlobData(STATS_KEY, stats);
+     } else {
+       fs.writeFileSync(STATS_FILE, JSON.stringify(stats, null, 2));
+     }
+
      console.log(`📊 Ação do usuário registrada: ${action}`);
      return true;
    } catch (error) {
@@ -369,7 +494,13 @@ export const storage = {
      stats.performanceMetrics[metric].total += value;
      stats.performanceMetrics[metric].count++;
      stats.performanceMetrics[metric].average = stats.performanceMetrics[metric].total / stats.performanceMetrics[metric].count;
-     fs.writeFileSync(STATS_FILE, JSON.stringify(stats, null, 2));
+
+     if (USE_BLOB_STORAGE) {
+       await writeBlobData(STATS_KEY, stats);
+     } else {
+       fs.writeFileSync(STATS_FILE, JSON.stringify(stats, null, 2));
+     }
+
      return true;
    } catch (error) {
      console.error('Error updating performance metric:', error);
