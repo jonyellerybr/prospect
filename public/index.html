@@ -839,7 +839,7 @@
         loadResults = async function(append = false, applyCurrentFilters = false) {
             try {
                 // Load companies from Blob Storage
-                const companiesResponse = await fetch('https://prospect-blob.public.blob.vercel-storage.com/companies.json');
+                const companiesResponse = await fetch('https://em220xmhzcez4n0c.public.blob.vercel-storage.com/companies.json');
                 if (companiesResponse.ok) {
                     const companiesData = await companiesResponse.json();
                     let allCompanies = Object.values(companiesData || {});
@@ -907,7 +907,7 @@
                 if (isOnline) {
                     try {
                         // Load companies directly from Blob Storage
-                        const companiesResponse = await fetch('https://prospect-blob.public.blob.vercel-storage.com/companies.json');
+                        const companiesResponse = await fetch('https://em220xmhzcez4n0c.public.blob.vercel-storage.com/companies.json');
                         if (companiesResponse.ok) {
                             const companiesData = await companiesResponse.json();
                             const allCompanies = Object.values(companiesData || {});
@@ -929,7 +929,7 @@
 
                         // Load searches from Blob Storage (if available)
                         try {
-                            const searchesResponse = await fetch('https://prospect-blob.public.blob.vercel-storage.com/searches.json');
+                            const searchesResponse = await fetch('https://em220xmhzcez4n0c.public.blob.vercel-storage.com/searches.json');
                             if (searchesResponse.ok) {
                                 const searchesData = await searchesResponse.json();
                                 if (searchesData && searchesData.length > 0) {
@@ -994,7 +994,7 @@
         async function loadStats() {
             try {
                 // Load stats directly from Blob Storage
-                const statsResponse = await fetch('https://prospect-blob.public.blob.vercel-storage.com/stats.json');
+                const statsResponse = await fetch('https://em220xmhzcez4n0c.public.blob.vercel-storage.com/stats.json');
                 if (statsResponse.ok) {
                     const statsData = await statsResponse.json();
 
@@ -1012,7 +1012,7 @@
 
                     // Learning stats (load from learning.json)
                     try {
-                        const learningResponse = await fetch('https://prospect-blob.public.blob.vercel-storage.com/learning.json');
+                        const learningResponse = await fetch('https://em220xmhzcez4n0c.public.blob.vercel-storage.com/learning.json');
                         if (learningResponse.ok) {
                             const learningData = await learningResponse.json();
 
