@@ -89,12 +89,37 @@ async function getBrowser() {
 
 const NEIGHBORHOODS = [
   "Aldeota", "Meireles", "Mucuripe", "Varjota", "Papicu",
-  "Centro", "Benfica", "Messejana", "Parangaba"
+  "Centro", "Benfica", "Messejana", "Parangaba", "Cocó",
+  "Joaquim Távora", "Dionísio Torres", "São João do Tauape",
+  "Cidade dos Funcionários", "Engenheiro Luciano Cavalcante",
+  "Passaré", "Fátima", "Montese", "Barra do Ceará",
+  "Praia do Futuro", "Jacarecanga", "Serrinha", "Cristo Redentor",
+  "Vila Velha", "Pirambu", "Cais do Porto", "Vicente Pinzón",
+  "José Bonifácio", "Henrique Jorge", "Planalto Ayrton Senna",
+  "Bom Jardim", "Canindezinho", "Siqueira", "Itaperi",
+  "Mondubim", "São Gerardo", "Jardim Cearense", "Jardim das Oliveiras"
 ];
 
 const BUSINESS_TYPES = [
   "restaurante", "advogado", "dentista", "salão beleza",
-  "academia", "pet shop", "mecânica", "loja roupas"
+  "academia", "pet shop", "mecânica", "loja roupas",
+  "barbearia", "psicólogo", "nutricionista", "fisioterapeuta",
+  "clínica veterinária", "lava jato", "borracharia", "chaveiro",
+  "encanador", "eletricista", "pintor", "marceneiro",
+  "construtora", "imobiliária", "contabilidade", "consultoria",
+  "escola", "curso", "fotografia", "decoração",
+  "floricultura", "hotel", "motel", "pousada",
+  "livraria", "papelaria", "farmácia", "drogaria",
+  "supermercado", "padaria", "açaiteria", "sorveteria",
+  "churrascaria", "pizzaria", "lanchonete", "cafeteria",
+  "hamburgueria", "sushi", "comida japonesa", "comida italiana",
+  "comida chinesa", "comida mexicana", "comida árabe", "comida vegetariana",
+  "massagista", "terapeuta", "personal trainer", "pilates",
+  "yoga", "dança", "artes marciais", "natação",
+  "joalheria", "perfumaria", "cosméticos", "bijuteria",
+  "material construção", "ferramentas", "eletrodomésticos", "informática",
+  "celulares", "acessórios", "brinquedos", "artigos festa",
+  "limpeza", "higiene", "bebidas", "conveniência"
 ];
 
 export default async function handler(req, res) {
@@ -143,38 +168,47 @@ export default async function handler(req, res) {
      const existingSearchKey = `search:${Buffer.from(searchTerm).toString('base64')}`;
      const existingSearch = await storage.getCompany(existingSearchKey);
 
+     let searchPage = 1; // Página padrão
+
      if (existingSearch && existingSearch.completedAt) {
-       console.log(`🔄 Busca já realizada anteriormente: ${searchTerm}`);
+       // Se já foi pesquisado na página 1, tentar página 2
+       if (!existingSearch.page2CompletedAt) {
+         console.log(`🔄 Busca já realizada na página 1, tentando página 2: ${searchTerm}`);
+         searchPage = 2;
+       } else {
+         console.log(`🔄 Busca já realizada em ambas as páginas: ${searchTerm}`);
 
-       // Buscar resultados associados a esta busca
-       const allCompanies = await storage.getAllCompanies();
-       const relatedResults = allCompanies.filter(company =>
-         company.searchTerm === searchTerm && company.foundAt
-       );
+         // Buscar resultados associados a esta busca (páginas 1 e 2)
+         const allCompanies = await storage.getAllCompanies();
+         const relatedResults = allCompanies.filter(company =>
+           company.searchTerm === searchTerm && company.foundAt
+         );
 
-       // Cachear o resultado para futuras buscas
-       await storage.setCachedSearchResult(searchTerm, {
-         results: relatedResults,
-         timestamp: Date.now()
-       });
+         // Cachear o resultado completo para futuras buscas
+         await storage.setCachedSearchResult(searchTerm, {
+           results: relatedResults,
+           timestamp: Date.now(),
+           pagesCompleted: 2
+         });
 
-       // Atualizar estatísticas mesmo para buscas puladas (não incrementar totalSearches)
-       await storage.incrementStat('totalResults', relatedResults.length);
-       await storage.incrementNeighborhoodHits(neighborhood, relatedResults.length);
-       await storage.incrementBusinessHits(business, relatedResults.length);
+         // Atualizar estatísticas mesmo para buscas puladas
+         await storage.incrementStat('totalResults', relatedResults.length);
+         await storage.incrementNeighborhoodHits(neighborhood, relatedResults.length);
+         await storage.incrementBusinessHits(business, relatedResults.length);
 
-       return res.status(200).json({
-         success: true,
-         searchTerm,
-         neighborhood,
-         businessType: business,
-         resultsFound: relatedResults.length,
-         results: relatedResults,
-         nextSearchIndex: searchIndex + 1,
-         hasMore: searchIndex + 1 < maxSearches,
-         skipped: true,
-         message: 'Busca já realizada anteriormente'
-       });
+         return res.status(200).json({
+           success: true,
+           searchTerm,
+           neighborhood,
+           businessType: business,
+           resultsFound: relatedResults.length,
+           results: relatedResults,
+           nextSearchIndex: searchIndex + 1,
+           hasMore: searchIndex + 1 < maxSearches,
+           skipped: true,
+           message: 'Busca já realizada em ambas as páginas'
+         });
+       }
      }
 
     console.log(`🔍 Buscando: ${searchTerm}`);
@@ -215,7 +249,15 @@ export default async function handler(req, res) {
       let allResults = [];
 
       try {
-        const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchTerm)}&num=10&hl=pt-BR`;
+        // Construir URL com paginação se necessário
+        let searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchTerm)}&num=10&hl=pt-BR`;
+
+        if (searchPage === 2) {
+          // Para página 2: adicionar parâmetro start=10
+          searchUrl += `&start=10`;
+          console.log(`📄 Buscando página 2 do Google`);
+        }
+
         console.log(`🌐 Acessando: ${searchUrl}`);
 
         const response = await page.goto(searchUrl, {
@@ -423,14 +465,23 @@ export default async function handler(req, res) {
         });
       }
 
-      // Marcar busca como concluída
-      await storage.saveCompany(existingSearchKey, {
-        searchTerm,
-        neighborhood,
-        businessType: business,
-        completedAt: timestamp,
-        resultsCount: validResults.length
-      });
+      // Marcar busca como concluída (atualizar ou criar registro)
+      const searchRecord = existingSearch || {};
+      searchRecord.searchTerm = searchTerm;
+      searchRecord.neighborhood = neighborhood;
+      searchRecord.businessType = business;
+
+      if (searchPage === 1) {
+        searchRecord.completedAt = timestamp;
+        searchRecord.page1Results = validResults.length;
+      } else if (searchPage === 2) {
+        searchRecord.page2CompletedAt = timestamp;
+        searchRecord.page2Results = validResults.length;
+      }
+
+      searchRecord.resultsCount = (searchRecord.page1Results || 0) + (searchRecord.page2Results || 0);
+
+      await storage.saveCompany(existingSearchKey, searchRecord);
 
       // Atualizar estatísticas
       await storage.incrementStat('totalSearches', 1);
@@ -439,12 +490,12 @@ export default async function handler(req, res) {
       await storage.incrementBusinessHits(business, validResults.length);
 
       // Atualizar sistema de aprendizado
-      await updateLearning(searchTerm, neighborhood, business, 'google_search', validResults.length);
+      await updateLearning(searchTerm, neighborhood, business, `google_search_page_${searchPage}`, validResults.length);
 
       console.log(`✅ Busca concluída: ${validResults.length} empresas salvas`);
     } else {
       // Mesmo sem resultados, atualizar aprendizado para estratégia pouco efetiva
-      await updateLearning(searchTerm, neighborhood, business, 'google_search', 0);
+      await updateLearning(searchTerm, neighborhood, business, `google_search_page_${searchPage}`, 0);
       console.log(`⚠️ Busca concluída sem resultados válidos`);
     }
 
