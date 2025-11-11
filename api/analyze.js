@@ -1,5 +1,5 @@
 import { storage } from './storage.js';
-import { analyzeCompany, generateProspectingReport, analyzeCompanyDeep, updateLearning, generateSmartSearchTerms } from './ai.js';
+import { analyzeCompany, generateProspectingReport, analyzeCompanyDeep, updateLearning, generateSmartSearchTerms, analyzeSentiment, generateApproachRecommendations } from './ai.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {

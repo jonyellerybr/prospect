@@ -333,13 +333,15 @@ Texto: "${text}"
 
 Responda apenas com: POSITIVO/NEUTRO/NEGATIVO - breve justificativa`;
 
-    if (geminiService.model) {
+    try {
       const result = await geminiService.generateContent(prompt);
       return {
         sentiment: result.split(' - ')[0].trim(),
         reason: result.split(' - ')[1]?.trim() || 'Análise realizada',
         confidence: 80
       };
+    } catch (error) {
+      console.warn('Gemini failed for sentiment analysis:', error.message);
     }
 
     return { sentiment: 'NEUTRO', reason: 'Análise não disponível', confidence: 0 };
@@ -363,12 +365,14 @@ Fatores positivos: ${prediction.factors.join(', ')}
 
 Forneça 3 recomendações práticas e específicas para abordagem comercial.`;
 
-    if (geminiService.model) {
+    try {
       const recommendations = await geminiService.generateContent(prompt);
       return {
         recommendations: recommendations.split('\n').filter(r => r.trim().length > 0),
         generated: true
       };
+    } catch (error) {
+      console.warn('Gemini failed for approach recommendations:', error.message);
     }
 
     return {

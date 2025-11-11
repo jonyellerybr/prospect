@@ -479,8 +479,8 @@
                     } else {
                         addStatusMessage('Prospecção concluída!');
                         stopProspecting();
+                        // Only update stats after completion, results are already updated
                         loadStats();
-                        loadResults(); // Recarregar para mostrar buscas atualizadas
                     }
                 } else {
                     console.error('Erro:', data.error);
@@ -1322,16 +1322,15 @@
         loadInitialData();
         loadStats();
 
-        // Auto-refresh data every 30 seconds
+        // Auto-refresh data every 5 minutes (reduced frequency to avoid overload)
         setInterval(() => {
             if (isOnline) {
-                loadResults();
-                loadStats();
+                console.log('Auto-refresh: updating data...');
+                loadStats(); // Only update stats, not full results to reduce load
             }
-        }, 30000);
+        }, 300000); // 5 minutes instead of 30 seconds
 
-        // Auto-refresh stats and sync data (removido para evitar duplicação)
-        // O refresh agora é feito junto com loadResults
+        // Auto-refresh is now optimized to run every 5 minutes instead of 30 seconds
 
         // Offline support
         window.addEventListener('online', handleOnline);
