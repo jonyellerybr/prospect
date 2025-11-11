@@ -50,7 +50,8 @@ export default async function handler(req, res) {
         uniqueCompanies: allCompanies.length,
         averagePerSearch: stats.totalSearches > 0
           ? (parseInt(stats.totalResults || 0) / parseInt(stats.totalSearches || 0)).toFixed(2)
-          : 0
+          : 0,
+        neighborhoodHits: stats.neighborhoods || {}
       },
       learning: {
         successRate: learning.successRate + '%',

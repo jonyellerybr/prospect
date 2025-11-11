@@ -168,17 +168,26 @@ export default async function handler(req, res) {
      const existingSearchKey = `search:${Buffer.from(searchTerm).toString('base64')}`;
      const existingSearch = await storage.getCompany(existingSearchKey);
 
-     let searchPage = 1; // Página padrão
+     let searchPage = 2; // Começar da página 2 (pular página 1 com empresas grandes)
 
      if (existingSearch && existingSearch.completedAt) {
-       // Se já foi pesquisado na página 1, tentar página 2
+       // Lógica de progressão: página 2 → 3 → 4 → 5
        if (!existingSearch.page2CompletedAt) {
-         console.log(`🔄 Busca já realizada na página 1, tentando página 2: ${searchTerm}`);
          searchPage = 2;
+         console.log(`🔄 Iniciando busca na página 2: ${searchTerm}`);
+       } else if (!existingSearch.page3CompletedAt) {
+         searchPage = 3;
+         console.log(`🔄 Busca já realizada na página 2, tentando página 3: ${searchTerm}`);
+       } else if (!existingSearch.page4CompletedAt) {
+         searchPage = 4;
+         console.log(`🔄 Busca já realizada até página 3, tentando página 4: ${searchTerm}`);
+       } else if (!existingSearch.page5CompletedAt) {
+         searchPage = 5;
+         console.log(`🔄 Busca já realizada até página 4, tentando página 5: ${searchTerm}`);
        } else {
-         console.log(`🔄 Busca já realizada em ambas as páginas: ${searchTerm}`);
+         console.log(`🔄 Busca já realizada em todas as páginas (2-5): ${searchTerm}`);
 
-         // Buscar resultados associados a esta busca (páginas 1 e 2)
+         // Buscar resultados associados a esta busca (páginas 2-5)
          const allCompanies = await storage.getAllCompanies();
          const relatedResults = allCompanies.filter(company =>
            company.searchTerm === searchTerm && company.foundAt
@@ -188,7 +197,7 @@ export default async function handler(req, res) {
          await storage.setCachedSearchResult(searchTerm, {
            results: relatedResults,
            timestamp: Date.now(),
-           pagesCompleted: 2
+           pagesCompleted: 5
          });
 
          // Atualizar estatísticas mesmo para buscas puladas
@@ -206,7 +215,7 @@ export default async function handler(req, res) {
            nextSearchIndex: searchIndex + 1,
            hasMore: searchIndex + 1 < maxSearches,
            skipped: true,
-           message: 'Busca já realizada em ambas as páginas'
+           message: 'Busca já realizada em todas as páginas (2-5)'
          });
        }
      }
@@ -252,10 +261,11 @@ export default async function handler(req, res) {
         // Construir URL com paginação se necessário
         let searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchTerm)}&num=10&hl=pt-BR`;
 
-        if (searchPage === 2) {
-          // Para página 2: adicionar parâmetro start=10
-          searchUrl += `&start=10`;
-          console.log(`📄 Buscando página 2 do Google`);
+        if (searchPage > 1) {
+          // Para páginas 2+: adicionar parâmetro start=(page-1)*10
+          const startParam = (searchPage - 1) * 10;
+          searchUrl += `&start=${startParam}`;
+          console.log(`📄 Buscando página ${searchPage} do Google`);
         }
 
         console.log(`🌐 Acessando: ${searchUrl}`);
@@ -471,15 +481,27 @@ export default async function handler(req, res) {
       searchRecord.neighborhood = neighborhood;
       searchRecord.businessType = business;
 
-      if (searchPage === 1) {
-        searchRecord.completedAt = timestamp;
-        searchRecord.page1Results = validResults.length;
-      } else if (searchPage === 2) {
+      // Registrar conclusão da página específica
+      if (searchPage === 2) {
         searchRecord.page2CompletedAt = timestamp;
         searchRecord.page2Results = validResults.length;
+      } else if (searchPage === 3) {
+        searchRecord.page3CompletedAt = timestamp;
+        searchRecord.page3Results = validResults.length;
+      } else if (searchPage === 4) {
+        searchRecord.page4CompletedAt = timestamp;
+        searchRecord.page4Results = validResults.length;
+      } else if (searchPage === 5) {
+        searchRecord.page5CompletedAt = timestamp;
+        searchRecord.page5Results = validResults.length;
       }
 
-      searchRecord.resultsCount = (searchRecord.page1Results || 0) + (searchRecord.page2Results || 0);
+      // Calcular total de resultados de todas as páginas
+      searchRecord.resultsCount =
+        (searchRecord.page2Results || 0) +
+        (searchRecord.page3Results || 0) +
+        (searchRecord.page4Results || 0) +
+        (searchRecord.page5Results || 0);
 
       await storage.saveCompany(existingSearchKey, searchRecord);
 

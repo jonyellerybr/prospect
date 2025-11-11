@@ -1253,17 +1253,24 @@
             const container = document.getElementById('neighborhood-heatmap');
             if (!container) return;
 
-            // Get learning data for neighborhoods
+            // Get all neighborhood stats from the API
             fetch('/api/stats')
                 .then(response => response.json())
                 .then(data => {
-                    if (data.success && data.learning.topNeighborhoods) {
-                        const neighborhoods = data.learning.topNeighborhoods; // Todos os bairros
+                    if (data.success) {
+                        // Get neighborhood hits from general stats
+                        const neighborhoodStats = data.general.neighborhoodHits || {};
+
+                        // Convert to array and sort by hits (descending)
+                        const neighborhoods = Object.entries(neighborhoodStats)
+                            .map(([name, hits]) => ({ name, score: hits }))
+                            .sort((a, b) => b.score - a.score);
 
                         if (neighborhoods.length > 0) {
+                            // Calculate intensity based on score
+                            const maxScore = Math.max(...neighborhoods.map(n => n.score));
+
                             container.innerHTML = neighborhoods.map(neighborhood => {
-                                // Calculate intensity based on score
-                                const maxScore = Math.max(...neighborhoods.map(n => n.score));
                                 const intensity = Math.round((neighborhood.score / maxScore) * 100);
 
                                 // Color based on intensity
@@ -1285,7 +1292,7 @@
                                 return `
                                     <div class="${bgColor} ${textColor} rounded-lg p-3 text-center">
                                         <div class="font-semibold text-sm">${neighborhood.name}</div>
-                                        <div class="text-xs opacity-90">${neighborhood.score} pts</div>
+                                        <div class="text-xs opacity-90">${neighborhood.score} buscas</div>
                                         <div class="text-xs opacity-75">${intensity}%</div>
                                     </div>
                                 `;
@@ -1294,7 +1301,7 @@
                             container.innerHTML = `
                                 <div class="col-span-full text-center text-gray-500 py-4">
                                     <i class="fas fa-map-marked-alt text-2xl mb-2"></i>
-                                    <p>Nenhum dado de bairros ainda</p>
+                                    <p>Nenhum bairro pesquisado ainda</p>
                                 </div>
                             `;
                         }
