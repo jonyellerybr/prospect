@@ -1048,91 +1048,87 @@
             try {
                 showDataStatus('Carregando dados...');
 
-                // First try to load from localStorage
+                // Always try to load from server first when online
+                if (isOnline) {
+                    showDataStatus('Sincronizando com servidor...');
+
+                    try {
+                        // Try auto-sync first
+                        const wasAutoSynced = await autoSyncLocalToCloud();
+
+                        // Load ALL results from server (not just first page)
+                        const response = await fetch('/api/results?limit=1000&offset=0&includeSearches=true');
+                        if (response.ok) {
+                            const serverData = await response.json();
+                            if (serverData.success && serverData.results.length > 0) {
+                                // Show ALL companies (no AI filtering for now)
+                                const allCompanies = serverData.results;
+
+                                if (allCompanies.length > 0) {
+                                    console.log(`Carregadas ${allCompanies.length} empresas do servidor`);
+                                    addResults(allCompanies, false);
+                                    elements.resultsTotal.textContent = allCompanies.length;
+                                    elements.resultsShown.textContent = allCompanies.length;
+
+                                    // Load searches
+                                    if (serverData.previousSearches) {
+                                        loadPreviousSearches(serverData.previousSearches);
+                                    }
+
+                                    // Update local cache with server data
+                                    localStorage.setItem('prospectDashboardData', JSON.stringify({
+                                        results: serverData.results,
+                                        total: serverData.total,
+                                        previousSearches: serverData.previousSearches,
+                                        lastSync: Date.now()
+                                    }));
+
+                                    const syncMessage = wasAutoSynced ?
+                                        `${allCompanies.length} empresas sincronizadas (auto-sync executado)` :
+                                        `${allCompanies.length} empresas sincronizadas`;
+
+                                    showDataStatus(syncMessage, 'success');
+                                    return; // Exit early, no need to load from cache
+                                }
+                            }
+                        }
+                        console.log('Erro ao carregar do servidor, tentando cache local...');
+                    } catch (serverError) {
+                        console.error('Erro no servidor:', serverError);
+                    }
+                }
+
+                // Fallback to localStorage if server fails or offline
                 const cachedData = localStorage.getItem('prospectDashboardData');
                 if (cachedData) {
                     const localData = JSON.parse(cachedData);
                     if (localData.results && localData.results.length > 0) {
-                        // Filter only AI-approved companies
-                        const approvedCompanies = localData.results.filter(company =>
-                            company.aiValidation && company.aiValidation.isValid === true
-                        );
+                        // Show ALL companies from cache (no AI filtering)
+                        const allCompanies = localData.results;
 
-                        if (approvedCompanies.length > 0) {
-                            console.log(`Carregando ${approvedCompanies.length} empresas aprovadas do cache local...`);
-                            addResults(approvedCompanies, false);
-                            elements.resultsTotal.textContent = approvedCompanies.length;
-                            elements.resultsShown.textContent = approvedCompanies.length;
+                        if (allCompanies.length > 0) {
+                            console.log(`Carregando ${allCompanies.length} empresas do cache local...`);
+                            addResults(allCompanies, false);
+                            elements.resultsTotal.textContent = allCompanies.length;
+                            elements.resultsShown.textContent = allCompanies.length;
 
                             // Load searches if available
                             if (localData.previousSearches) {
                                 loadPreviousSearches(localData.previousSearches);
                             }
 
-                            showDataStatus(`${approvedCompanies.length} empresas aprovadas carregadas`, 'success');
+                            const statusMsg = isOnline ? 'Dados locais carregados (servidor indisponível)' : 'Dados locais carregados (modo offline)';
+                            showDataStatus(statusMsg, 'warning');
                         } else {
-                            console.log('Nenhuma empresa aprovada encontrada no cache local');
-                            showDataStatus('Nenhuma empresa aprovada no cache', 'warning');
-                        }
-                    }
-                }
-
-                // Then try to load from server (will override local if newer)
-                if (isOnline) {
-                    showDataStatus('Sincronizando com servidor...');
-
-                    // Try auto-sync first
-                    const wasAutoSynced = await autoSyncLocalToCloud();
-
-                    // Load ALL results from server (not just first page)
-                    const response = await fetch('/api/results?limit=1000&offset=0&includeSearches=true');
-                    if (response.ok) {
-                        const serverData = await response.json();
-                        if (serverData.success && serverData.results.length > 0) {
-                            // Show ALL companies for now (we can filter later if needed)
-                            // TODO: Add toggle for showing only AI-approved companies
-                            const allCompanies = serverData.results;
-
-                            if (allCompanies.length > 0) {
-                                // Show all results
-                                addResults(allCompanies, false);
-                                elements.resultsTotal.textContent = allCompanies.length;
-                                elements.resultsShown.textContent = allCompanies.length;
-
-                                // Load searches
-                                if (serverData.previousSearches) {
-                                    loadPreviousSearches(serverData.previousSearches);
-                                }
-
-                                // Update local cache with ALL server data
-                                localStorage.setItem('prospectDashboardData', JSON.stringify({
-                                    results: serverData.results,
-                                    total: serverData.total,
-                                    previousSearches: serverData.previousSearches,
-                                    lastSync: Date.now()
-                                }));
-
-                                const syncMessage = wasAutoSynced ?
-                                    `${allCompanies.length} empresas sincronizadas (auto-sync executado)` :
-                                    `${allCompanies.length} empresas sincronizadas`;
-
-                                console.log(`Carregadas ${allCompanies.length} empresas do servidor`);
-                                showDataStatus(syncMessage, 'success');
-                            } else {
-                                console.log('Nenhuma empresa encontrada no servidor');
-                                showDataStatus('Nenhuma empresa no servidor', 'warning');
-                            }
-                        } else {
-                            // If no server data, try local cache
-                            console.log('Nenhum dado no servidor, tentando cache local...');
-                            showDataStatus('Usando dados locais', 'warning');
+                            console.log('Nenhuma empresa encontrada no cache local');
+                            showDataStatus('Nenhum dado encontrado', 'warning');
                         }
                     } else {
-                        showDataStatus('Erro na sincronização', 'error');
+                        showDataStatus('Nenhum dado em cache', 'warning');
                     }
                 } else {
-                    console.log('Modo offline - usando dados em cache');
-                    showDataStatus('Modo offline', 'warning');
+                    const statusMsg = isOnline ? 'Nenhum dado encontrado' : 'Modo offline - nenhum dado em cache';
+                    showDataStatus(statusMsg, 'warning');
                 }
             } catch (error) {
                 console.error('Erro ao carregar dados iniciais:', error);
