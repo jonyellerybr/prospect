@@ -109,8 +109,10 @@ export default async function handler(req, res) {
 
         // Procurar empresa que tenha URL similar
         let foundCompany = null;
+        let decodedUrl = null;
+
         try {
-          const decodedUrl = atob(companyId);
+          decodedUrl = atob(companyId);
           console.log('URL decodificada:', decodedUrl);
 
           for (const comp of allCompanies) {
